@@ -512,17 +512,39 @@ const updateStatus = {
   dhmi:   { lastRun: null, lastCount: 0, running: false },
 };
 
-// Shared helper: writes new flights to SQLite via transaction
+// Shared helper: writes new flights to SQLite via transaction with conflict resolution (upsert)
 function persistFlights(newFlights) {
   if (!newFlights || newFlights.length === 0) return;
   db.serialize(() => {
     db.run("BEGIN TRANSACTION");
     const stmt = db.prepare(`
-      INSERT OR REPLACE INTO flights (
+      INSERT INTO flights (
         flightNumber, date, airline, departureAirport, arrivalAirport,
         departureCity, arrivalCity, scheduledDeparture, scheduledArrival,
         actualTime, terminal, gate, status
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(flightNumber, date, departureAirport, arrivalAirport) DO UPDATE SET
+        airline = CASE WHEN excluded.airline != 'Diğer Havayolu' AND excluded.airline != '' THEN excluded.airline ELSE flights.airline END,
+        departureCity = CASE WHEN excluded.departureCity != '' AND excluded.departureCity IS NOT NULL THEN excluded.departureCity ELSE flights.departureCity END,
+        arrivalCity = CASE WHEN excluded.arrivalCity != '' AND excluded.arrivalCity IS NOT NULL THEN excluded.arrivalCity ELSE flights.arrivalCity END,
+        scheduledDeparture = CASE WHEN excluded.scheduledDeparture != '-' AND excluded.scheduledDeparture != '' AND excluded.scheduledDeparture IS NOT NULL THEN excluded.scheduledDeparture ELSE flights.scheduledDeparture END,
+        scheduledArrival = CASE WHEN excluded.scheduledArrival != '-' AND excluded.scheduledArrival != '' AND excluded.scheduledArrival IS NOT NULL THEN excluded.scheduledArrival ELSE flights.scheduledArrival END,
+        actualTime = CASE 
+          WHEN (UPPER(flights.status) LIKE '%İNDİ%' OR UPPER(flights.status) LIKE '%LANDED%' OR UPPER(flights.status) LIKE '%İPTAL%' OR UPPER(flights.status) LIKE '%CANCEL%')
+               AND (UPPER(excluded.status) NOT LIKE '%İNDİ%' AND UPPER(excluded.status) NOT LIKE '%LANDED%' AND UPPER(excluded.status) NOT LIKE '%İPTAL%' AND UPPER(excluded.status) NOT LIKE '%CANCEL%')
+               THEN flights.actualTime
+          WHEN excluded.actualTime != '-' AND excluded.actualTime != '' AND excluded.actualTime IS NOT NULL THEN excluded.actualTime
+          ELSE flights.actualTime
+        END,
+        terminal = CASE WHEN excluded.terminal != 'Ana Terminal' AND excluded.terminal != '-' AND excluded.terminal != '' AND excluded.terminal IS NOT NULL THEN excluded.terminal ELSE flights.terminal END,
+        gate = CASE WHEN excluded.gate != '-' AND excluded.gate != '' AND excluded.gate IS NOT NULL THEN excluded.gate ELSE flights.gate END,
+        status = CASE 
+          WHEN (UPPER(flights.status) LIKE '%İNDİ%' OR UPPER(flights.status) LIKE '%LANDED%' OR UPPER(flights.status) LIKE '%İPTAL%' OR UPPER(flights.status) LIKE '%CANCEL%')
+               AND (UPPER(excluded.status) NOT LIKE '%İNDİ%' AND UPPER(excluded.status) NOT LIKE '%LANDED%' AND UPPER(excluded.status) NOT LIKE '%İPTAL%' AND UPPER(excluded.status) NOT LIKE '%CANCEL%')
+               THEN flights.status
+          WHEN excluded.status != 'Planlandı' AND excluded.status != 'PLANLANDI' AND excluded.status != 'Planlandı / Scheduled' AND excluded.status != '-' AND excluded.status != '' AND excluded.status IS NOT NULL THEN excluded.status
+          ELSE flights.status
+        END
     `);
     newFlights.forEach(f => {
       stmt.run([
@@ -777,39 +799,91 @@ app.get('/api/flights/search', (req, res) => {
       });
     }
 
-    // Merge the flight records by route leg
-    const mergedMap = new Map();
-    rows.forEach(f => {
-      const key = `${f.flightNumber}_${f.departureAirport}_${f.arrivalAirport}`;
-      if (!mergedMap.has(key)) {
-        mergedMap.set(key, { ...f });
-      } else {
-        const existing = mergedMap.get(key);
-        if (existing.scheduledDeparture === '-' && f.scheduledDeparture !== '-') {
-          existing.scheduledDeparture = f.scheduledDeparture;
-          existing.date = f.date; // Prefer departure date
-        }
-        if (existing.scheduledArrival === '-' && f.scheduledArrival !== '-') {
-          existing.scheduledArrival = f.scheduledArrival;
-        }
-        if (existing.actualTime === '-' || existing.actualTime === existing.scheduledDeparture || existing.actualTime === existing.scheduledArrival) {
-          if (f.actualTime !== '-') existing.actualTime = f.actualTime;
-        }
-        if (f.gate !== '-' && existing.gate === '-') existing.gate = f.gate;
-        if (f.terminal !== 'Ana Terminal' && existing.terminal === 'Ana Terminal') existing.terminal = f.terminal;
-        
-        const getStatusPriority = (status) => {
-          if (!status || status === '-' || status.toLowerCase().includes('plan')) return 0;
-          if (status.toLowerCase().includes('time') || status.toLowerCase().includes('zaman')) return 1;
-          return 2;
-        };
-        if (getStatusPriority(f.status) > getStatusPriority(existing.status)) {
-          existing.status = f.status;
-        }
-      }
+    // Sort rows by date ascending, then by departure/arrival time
+    rows.sort((a, b) => {
+      if (a.date !== b.date) return a.date.localeCompare(b.date);
+      const timeA = a.scheduledDeparture !== '-' ? a.scheduledDeparture : a.scheduledArrival;
+      const timeB = b.scheduledDeparture !== '-' ? b.scheduledDeparture : b.scheduledArrival;
+      return timeA.localeCompare(timeB);
     });
 
-    const mergedFlights = Array.from(mergedMap.values());
+    // Merge complementary adjacent-day rows (overnight flights)
+    const processedRows = [];
+    const mergedIndices = new Set();
+
+    for (let i = 0; i < rows.length; i++) {
+      if (mergedIndices.has(i)) continue;
+      
+      const current = { ...rows[i] };
+
+      // Look for a complementary row in subsequent rows
+      for (let j = i + 1; j < rows.length; j++) {
+        if (mergedIndices.has(j)) continue;
+        
+        const next = rows[j];
+        
+        // Must be same route
+        if (current.departureAirport !== next.departureAirport || current.arrivalAirport !== next.arrivalAirport) {
+          continue;
+        }
+
+        // Must be adjacent days (current.date is D, next.date is D+1 or same date)
+        const dateA = new Date(current.date);
+        const dateB = new Date(next.date);
+        const diffDays = Math.round((dateB - dateA) / (1000 * 60 * 60 * 24));
+
+        if (diffDays === 0 || diffDays === 1) {
+          // Check if they are complementary:
+          // Case 1: current has departure but no arrival, next has arrival but no departure
+          const currentHasDepOnly = current.scheduledDeparture !== '-' && current.scheduledArrival === '-';
+          const nextHasArrOnly = next.scheduledArrival !== '-' && next.scheduledDeparture === '-';
+
+          // Case 2: current has arrival but no departure, next has departure but no arrival (less common chronologically, but possible)
+          const currentHasArrOnly = current.scheduledArrival !== '-' && current.scheduledDeparture === '-';
+          const nextHasDepOnly = next.scheduledDeparture !== '-' && next.scheduledArrival === '-';
+
+          if ((currentHasDepOnly && nextHasArrOnly) || (currentHasArrOnly && nextHasDepOnly)) {
+            // Merge next into current
+            if (next.scheduledDeparture !== '-') {
+              current.scheduledDeparture = next.scheduledDeparture;
+              current.date = next.date; // Prefer departure date
+            }
+            if (next.scheduledArrival !== '-') {
+              current.scheduledArrival = next.scheduledArrival;
+            }
+            if (next.actualTime !== '-' && next.actualTime !== next.scheduledDeparture) {
+              current.actualTime = next.actualTime;
+            }
+            if (next.gate !== '-' && current.gate === '-') {
+              current.gate = next.gate;
+            }
+            if (next.terminal !== 'Ana Terminal' && current.terminal === 'Ana Terminal') {
+              current.terminal = next.terminal;
+            }
+            
+            const getStatusPriority = (status) => {
+              if (!status || status === '-' || status.toLowerCase().includes('plan')) return 0;
+              if (status.toLowerCase().includes('time') || status.toLowerCase().includes('zaman')) return 1;
+              return 2;
+            };
+            if (getStatusPriority(next.status) > getStatusPriority(current.status)) {
+              current.status = next.status;
+            }
+
+            mergedIndices.add(j);
+            break;
+          }
+        }
+      }
+
+      processedRows.push(current);
+    }
+
+    // Find the best match for the requested dateStr
+    let bestMatch = processedRows.find(f => f.date === dateStr);
+    if (!bestMatch && processedRows.length > 0) {
+      bestMatch = processedRows[0];
+    }
 
     res.json({
       success: true,
@@ -817,9 +891,9 @@ app.get('/api/flights/search', (req, res) => {
         flightNumber: flightNumber,
         date: dateStr
       },
-      count: mergedFlights.length,
-      flights: mergedFlights,
-      flight: mergedFlights[0] // Backward compatibility
+      count: processedRows.length,
+      flights: processedRows,
+      flight: bestMatch
     });
   });
 });
