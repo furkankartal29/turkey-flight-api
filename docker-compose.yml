@@ -1,0 +1,20 @@
+services:
+  flight-api:
+    build: .
+    container_name: flight-api-service
+    ports:
+      - "3000:3000"
+    volumes:
+      # SQLite veritabanı — container yeniden başlayınca veri kaybolmaz
+      - ./flights.db:/app/flights.db
+      # public/ klasörü mount — CSS/HTML değişince rebuild gerekmez, sadece sayfayı yenile
+      - ./public:/app/public
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+    restart: always
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '1.0'

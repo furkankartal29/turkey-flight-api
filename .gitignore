@@ -1,0 +1,23 @@
+# Bağımlılıklar
+node_modules/
+
+# Veritabanı (boş başlasın, volume ile yönetilir)
+flights.db
+db.json
+
+# Log dosyaları
+*.log
+npm-debug.log*
+
+# Ortam dosyaları
+.env
+.env.local
+.env.production
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/

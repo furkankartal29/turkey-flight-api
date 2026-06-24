@@ -1,0 +1,806 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Türkiye Uçuş Arama Motoru ve API Servisi</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+
+  <div class="container">
+    
+    <!-- Header -->
+    <header>
+      <div class="logo-section">
+        <div class="logo-icon">
+          <i class="fa-solid fa-plane-departure"></i>
+        </div>
+        <div>
+          <h1>Türkiye Uçuş Arama Motoru</h1>
+          <p style="margin: 0; color: var(--text-secondary);">45 Havalimanı Arasında Uçuş Tarifesi Arama Ekranı</p>
+        </div>
+      </div>
+      <div class="status-badge"><span class="pulse-dot"></span> Veri Akışı Aktif</div>
+    </header>
+
+    <!-- Quick Stats Cards (General Data, No Istanbul Focus) -->
+    <div class="stats-container">
+      <div class="stat-card" onclick="filterByQuickStats('', '')">
+        <div class="stat-title">Toplam Havalimanı</div>
+        <div class="stat-value" id="stat-airports-count">45</div>
+        <div class="stat-sub">Türkiye Geneli Havalimanı</div>
+      </div>
+      <div class="stat-card" onclick="filterByQuickStats('', '')">
+        <div class="stat-title">Toplam Günlük Uçuş</div>
+        <div class="stat-value" id="stat-total-flights">-</div>
+        <div class="stat-sub">Aktif Tarifeli Seferler</div>
+      </div>
+      <div class="stat-card" onclick="filterByQuickStats('', 'departure')">
+        <div class="stat-title">Aktif Kalkış Trafiği</div>
+        <div class="stat-value" id="stat-departures-count">-</div>
+        <div class="stat-sub">Kalkış Seferlerini Listele</div>
+      </div>
+      <div class="stat-card" onclick="filterByQuickStats('', 'arrival')">
+        <div class="stat-title">Aktif Varış Trafiği</div>
+        <div class="stat-value" id="stat-arrivals-count">-</div>
+        <div class="stat-sub">Varış Seferlerini Listele</div>
+      </div>
+    </div>
+
+    <!-- Main Search Console Card -->
+    <div class="card">
+      <h3 class="card-title"><i class="fa-solid fa-magnifying-glass"></i> Uçuş Arama Paneli</h3>
+      
+      <!-- Search Form Grid -->
+      <div class="filter-row">
+        <div class="input-group">
+          <label for="search-departure">Nereden (Kalkış Havalimanı)</label>
+          <select id="search-departure">
+            <option value="">Tümü (Seçiniz)</option>
+            <!-- Populated dynamically -->
+          </select>
+        </div>
+        
+        <div class="input-group">
+          <label for="search-arrival">Nereye (Varış Havalimanı)</label>
+          <select id="search-arrival">
+            <option value="">Tümü (Seçiniz)</option>
+            <!-- Populated dynamically -->
+          </select>
+        </div>
+        
+        <div class="input-group">
+          <label for="search-date">Uçuş Tarihi</label>
+          <input type="date" id="search-date">
+        </div>
+        
+        <div class="input-group">
+          <label for="search-airline-flight">Havayolu veya Uçuş No</label>
+          <input type="text" id="search-airline-flight" placeholder="Örn: Pegasus / TK7330">
+        </div>
+      </div>
+
+      <!-- Action Search Button -->
+      <div class="search-btn-container">
+        <button class="btn-search" onclick="searchFlights()"><i class="fa-solid fa-magnifying-glass"></i> Uçuşları Ara</button>
+      </div>
+
+      <!-- FIDS Table View -->
+      <div class="table-container" style="margin-top: 2rem;">
+        <table>
+          <thead>
+            <tr>
+              <th onclick="handleSort('flightNumber')">Uçuş Kodu <span id="sort-flightNumber"></span></th>
+              <th onclick="handleSort('airline')">Havayolu <span id="sort-airline"></span></th>
+              <th>Rota (Kalkış &rarr; Varış)</th>
+              <th>Şehirler</th>
+              <th onclick="handleSort('scheduledDeparture')">Kalkış Saati <span id="sort-scheduledDeparture"></span></th>
+              <th onclick="handleSort('scheduledArrival')">Varış Saati <span id="sort-scheduledArrival"></span></th>
+              <th onclick="handleSort('actualTime')">Beklenen Zaman <span id="sort-actualTime"></span></th>
+              <th>Terminal/Kapı</th>
+              <th onclick="handleSort('status')">Durum <span id="sort-status"></span></th>
+            </tr>
+          </thead>
+          <tbody id="flights-table-body">
+            <tr>
+              <td colspan="9" style="text-align: center; color: var(--text-secondary); padding: 2rem;">Arama kriterlerini belirleyip "Uçuşları Ara" butonuna basın.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Pagination Footer -->
+      <div class="pagination-container" id="pagination-wrapper" style="display: none;">
+        <div class="pagination-info" id="pagination-info">Uçuş listeleniyor...</div>
+        <div class="pagination-controls" id="pagination-controls">
+          <!-- Populated dynamically -->
+        </div>
+      </div>
+
+    </div>
+
+    <!-- API Reference & Sandbox Grid -->
+    <div class="grid-2">
+      
+      <!-- API Endpoints Card -->
+      <div class="card">
+        <h3 class="card-title"><i class="fa-solid fa-code"></i> Geliştirici REST API</h3>
+        <p>Arama motorumuzun kullandığı uç noktaları sorgulayarak doğrudan rota tabanlı (kalkış ve varış parametreli) JSON listelerini çekebilirsiniz.</p>
+        
+        <div class="endpoint-list" style="margin-top: 1.5rem;">
+          
+          <div class="endpoint-item">
+            <div class="endpoint-header">
+              <span class="method get">GET</span>
+              <span class="path" id="path-flights-route">/api/flights?departure=SAW&arrival=ADB</span>
+              <span class="desc">Kalkış-Varış Rota API'si</span>
+              <button class="copy-btn" onclick="copyPath('path-flights-route')" title="Kopyala"><i class="fa-regular fa-copy"></i></button>
+              <button class="btn-test" onclick="testEndpoint('/api/flights?departure=SAW&arrival=ADB')">Test Et</button>
+            </div>
+          </div>
+
+          <div class="endpoint-item">
+            <div class="endpoint-header">
+              <span class="method get">GET</span>
+              <span class="path" id="path-search">/api/flights/search</span>
+              <span class="desc">Uçuş Kodu & Tarih API'si</span>
+              <button class="copy-btn" onclick="copyPath('path-search')" title="Kopyala"><i class="fa-regular fa-copy"></i></button>
+              <button class="btn-test" id="btn-test-search" onclick="testEndpoint('/api/flights/search?flightNumber=TK7330')">Test Et</button>
+            </div>
+          </div>
+
+          <div class="endpoint-item">
+            <div class="endpoint-header">
+              <span class="method get">GET</span>
+              <span class="path" id="path-airports">/api/airports</span>
+              <span class="desc">Havalimanları Sözlüğü</span>
+              <button class="copy-btn" onclick="copyPath('path-airports')" title="Kopyala"><i class="fa-regular fa-copy"></i></button>
+              <button class="btn-test" onclick="testEndpoint('/api/airports')">Test Et</button>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- Interactive API Sandbox -->
+        <div style="margin-top: 2rem; padding-top: 1.5rem; border-top: 1.5px solid var(--border-color);">
+          <h4 style="font-size: 1rem; font-weight: 800; margin-bottom: 1rem; color: var(--text-primary);"><i class="fa-solid fa-flask"></i> İnteraktif API Sandbox</h4>
+          
+          <!-- Sandbox Tabs -->
+          <div style="display: flex; gap: 1rem; margin-bottom: 1rem; border-bottom: 1.5px solid var(--border-color); padding-bottom: 0.5rem;">
+            <button id="sandbox-tab-search" onclick="switchSandboxTab('search')" style="background: none; border: none; font-family: var(--font-sans); font-size: 0.8rem; font-weight: 700; color: var(--accent-cyan); cursor: pointer; padding-bottom: 0.25rem; border-bottom: 2px solid var(--accent-cyan); outline: none;">Uçuş No ile Sorgula</button>
+            <button id="sandbox-tab-route" onclick="switchSandboxTab('route')" style="background: none; border: none; font-family: var(--font-sans); font-size: 0.8rem; font-weight: 700; color: var(--text-secondary); cursor: pointer; padding-bottom: 0.25rem; outline: none;">Rota ile Sorgula</button>
+          </div>
+
+          <!-- Tab Content: Flight Number -->
+          <div id="sandbox-content-search">
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
+              <div class="input-group">
+                <label style="font-size: 0.65rem;" for="sandbox-flight">Uçuş Kodu</label>
+                <input type="text" id="sandbox-flight" placeholder="Örn: PC2521" style="padding: 0.5rem 0.75rem; font-size: 0.85rem;">
+              </div>
+              <div class="input-group">
+                <label style="font-size: 0.65rem;" for="sandbox-date-search">Uçuş Tarihi</label>
+                <input type="date" id="sandbox-date-search" style="padding: 0.5rem 0.75rem; font-size: 0.85rem;">
+              </div>
+            </div>
+          </div>
+
+          <!-- Tab Content: Route -->
+          <div id="sandbox-content-route" style="display: none;">
+            <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0.75rem; margin-bottom: 1rem;">
+              <div class="input-group">
+                <label style="font-size: 0.65rem;" for="sandbox-dep">Kalkış Havalimanı</label>
+                <select id="sandbox-dep" style="padding: 0.5rem 0.5rem; font-size: 0.85rem; height: 38px;">
+                  <option value="">Tümü (Seçiniz)</option>
+                </select>
+              </div>
+              <div class="input-group">
+                <label style="font-size: 0.65rem;" for="sandbox-arr">Varış Havalimanı</label>
+                <select id="sandbox-arr" style="padding: 0.5rem 0.5rem; font-size: 0.85rem; height: 38px;">
+                  <option value="">Tümü (Seçiniz)</option>
+                </select>
+              </div>
+              <div class="input-group">
+                <label style="font-size: 0.65rem;" for="sandbox-date-route">Tarih</label>
+                <input type="date" id="sandbox-date-route" style="padding: 0.5rem 0.75rem; font-size: 0.85rem; height: 38px;">
+              </div>
+            </div>
+          </div>
+
+          <div style="display: flex; gap: 1rem; justify-content: flex-end; align-items: center; margin-top: 1rem;">
+            <div id="sandbox-url-preview" style="font-family: var(--font-mono); font-size: 0.72rem; color: var(--accent-cyan); word-break: break-all; flex: 1; text-align: left;">Sorgu göndermek için parametreleri girip Gönder butonuna basın.</div>
+            <button class="btn-test" onclick="runSandboxTest()" style="padding: 0.5rem 1.5rem; font-size: 0.85rem;"><i class="fa-solid fa-play"></i> Gönder</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Live Test Console Card -->
+      <div class="card" style="display: flex; flex-direction: column;">
+        <div class="console-header">
+          <h3 class="card-title" style="margin: 0;"><i class="fa-solid fa-terminal"></i> Canlı Yanıt Konsolu</h3>
+          <span class="console-status" id="console-status">Bekleniyor...</span>
+        </div>
+        <div class="code-container" style="flex: 1;">
+          <pre><code id="json-output">// API uç noktalarından birinin yanındaki "Test Et" butonuna basarak canlı JSON çıktısını görebilirsiniz.</code></pre>
+        </div>
+      </div>
+
+    </div>
+
+  </div>
+
+  <!-- Slide-out Flight Detail Panel (Static Style) -->
+  <div id="detail-panel" class="detail-panel">
+    <button class="detail-panel-close" onclick="closeDetailPanel()"><i class="fa-solid fa-xmark"></i></button>
+    
+    <div class="detail-header">
+      <div class="detail-flight-num" id="det-flight-num">-</div>
+      <div class="detail-airline" id="det-airline">-</div>
+      <div style="margin-top: 0.5rem;"><span class="status-pill planlandi" id="det-status-pill">-</span></div>
+    </div>
+
+    <!-- Route Visual connector -->
+    <div class="detail-route-visual">
+      <div class="route-node">
+        <div class="route-iata" id="det-route-dep-iata">-</div>
+        <div class="route-city" id="det-route-dep-city">-</div>
+      </div>
+      <div class="route-connector">
+        <i class="fa-solid fa-plane"></i>
+      </div>
+      <div class="route-node">
+        <div class="route-iata" id="det-route-arr-iata">-</div>
+        <div class="route-city" id="det-route-arr-city">-</div>
+      </div>
+    </div>
+
+    <!-- Flight Info Grid details -->
+    <div class="detail-info-grid">
+      <div>
+        <div class="detail-label">Tarih</div>
+        <div class="detail-val" id="det-date">-</div>
+      </div>
+      <div>
+        <div class="detail-label">Terminal / Kapı</div>
+        <div class="detail-val" id="det-gate">-</div>
+      </div>
+      <div>
+        <div class="detail-label">Planlanan Kalkış</div>
+        <div class="detail-val" id="det-scheduled-dep">-</div>
+      </div>
+      <div>
+        <div class="detail-label">Planlanan Varış</div>
+        <div class="detail-val" id="det-scheduled-arr">-</div>
+      </div>
+      <div>
+        <div class="detail-label">Gerçekleşen/Beklenen</div>
+        <div class="detail-val" id="det-actual-time" style="color: var(--accent-cyan);">-</div>
+      </div>
+      <div>
+        <div class="detail-label">Uçuş Tipi</div>
+        <div class="detail-val" id="det-flight-type">-</div>
+      </div>
+    </div>
+    
+    <div class="card" style="padding: 1.25rem; background: #f8fafc; border-radius: 12px; border-color: var(--border-color); margin-top: 1rem; box-shadow: none;">
+      <h4 style="font-size: 0.85rem; margin-bottom: 0.5rem; color: var(--accent-cyan);"><i class="fa-solid fa-code"></i> Bu Uçuş İçin Arama API Sorgusu</h4>
+      <code id="det-api-link" style="font-size: 0.75rem; font-family: var(--font-mono); color: var(--text-secondary); word-break: break-all;">-</code>
+    </div>
+  </div>
+
+  <script>
+    // Global flight list state
+    let cachedFlights = [];
+    let currentSortColumn = 'scheduledDeparture';
+    let currentSortDirection = 'asc';
+
+    // Pagination State
+    let currentPage = 1;
+    const itemsPerPage = 10;
+
+    // Get today's local date string
+    function getTodayDateString() {
+      const d = new Date();
+      const year = d.getFullYear();
+      const month = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    }
+
+    document.getElementById('search-date').value = getTodayDateString();
+
+    // Translate status text into class
+    function getStatusClass(status) {
+      if (!status) return 'planlandi';
+      const s = status.toLowerCase();
+      if (s.includes('uçuş yapıldı') || s.includes('uçuldu') || s.includes('indi')) return 'indi';
+      if (s.includes('kapı kapandı') || s.includes('bagaj')) return 'kapi-kapandi';
+      if (s.includes('son çağrı') || s.includes('yaklaşıyor') || s.includes('kapiya git') || s.includes('kapıya gidin') || s.includes('havada')) return 'son-cagri';
+      if (s.includes('gecikme') || s.includes('delayed')) return 'gecikme';
+      if (s.includes('iptal') || s.includes('cancelled')) return 'iptal';
+      return 'planlandi';
+    }
+
+    // Populate airport dropdowns on load
+    async function loadAirportsDropdowns() {
+      const depSelect = document.getElementById('search-departure');
+      const arrSelect = document.getElementById('search-arrival');
+      try {
+        const res = await fetch('/api/airports');
+        const data = await res.json();
+        if (data.success) {
+          const sortedCodes = Object.keys(data.airports).sort((a, b) => {
+            return data.airports[a].city.localeCompare(data.airports[b].city, 'tr');
+          });
+
+          sortedCodes.forEach(code => {
+            const ap = data.airports[code];
+            
+            const optDep = document.createElement('option');
+            optDep.value = code;
+            optDep.innerText = `${ap.city} - ${ap.name} (${code})`;
+            depSelect.appendChild(optDep);
+
+            const optArr = document.createElement('option');
+            optArr.value = code;
+            optArr.innerText = `${ap.city} - ${ap.name} (${code})`;
+            arrSelect.appendChild(optArr);
+          });
+        }
+      } catch (e) {
+        console.error('Havalimanları listesi yüklenemedi:', e);
+      }
+    }
+
+    // Quick Stats click shortcuts
+    async function filterByQuickStats(dep, typeVal) {
+      document.getElementById('search-departure').value = dep;
+      document.getElementById('search-arrival').value = '';
+      document.getElementById('search-airline-flight').value = '';
+      
+      const typeSelect = document.getElementById('filter-type');
+      if (typeSelect) {
+        typeSelect.value = typeVal;
+      }
+      
+      await searchFlights();
+    }
+
+    // Fetch flight list based on search parameters
+    async function searchFlights() {
+      const departure = document.getElementById('search-departure').value;
+      const arrival = document.getElementById('search-arrival').value;
+      const date = document.getElementById('search-date').value;
+      const queryText = document.getElementById('search-airline-flight').value.trim();
+      
+      const tbody = document.getElementById('flights-table-body');
+      const pagWrapper = document.getElementById('pagination-wrapper');
+      
+      pagWrapper.style.display = 'none';
+      tbody.innerHTML = `<tr><td colspan="9" style="text-align: center; color: var(--text-secondary); padding: 2rem;">Uçuş verileri aranıyor...</td></tr>`;
+
+      // Build query string
+      const params = new URLSearchParams();
+      if (departure) params.append('departure', departure);
+      if (arrival) params.append('arrival', arrival);
+      if (date) params.append('date', date);
+
+      if (queryText) {
+        const isFlightNumber = /^[a-zA-Z]{2,3}\d+$/i.test(queryText.replace(/\s+/g, ''));
+        if (isFlightNumber) {
+          params.append('flight', queryText);
+        } else {
+          params.append('airline', queryText);
+        }
+      }
+
+      try {
+        const res = await fetch(`/api/flights?${params.toString()}`);
+        const data = await res.json();
+        
+        if (!data.success || data.flights.length === 0) {
+          tbody.innerHTML = `<tr><td colspan="9" style="text-align: center; color: var(--text-secondary); padding: 2rem;">Arama kriterlerine uygun uçuş bulunamadı.</td></tr>`;
+          cachedFlights = [];
+          return;
+        }
+
+        cachedFlights = data.flights;
+        
+        // Reset page to 1 on fresh search
+        currentPage = 1;
+
+        // Sort and render cached flights
+        sortFlights();
+        renderFlightsTable();
+        renderPaginationControls();
+        updateQuickStats(data.flights);
+
+        if (data.flights.length > 0) {
+          const sampleFlight = data.flights[0].flightNumber;
+          const testBtn = document.getElementById('btn-test-search');
+          if (testBtn) {
+            testBtn.setAttribute('onclick', `testEndpoint('/api/flights/search?flightNumber=${sampleFlight}')`);
+          }
+        }
+
+      } catch (error) {
+        tbody.innerHTML = `<tr><td colspan="9" style="text-align: center; color: var(--accent-red); padding: 2rem;">Arama hatası: ${error.message}</td></tr>`;
+      }
+    }
+
+    // Sort list based on current column and direction
+    function sortFlights() {
+      cachedFlights.sort((a, b) => {
+        let valA = a[currentSortColumn] || '';
+        let valB = b[currentSortColumn] || '';
+
+        if (currentSortColumn === 'scheduledDeparture' || currentSortColumn === 'scheduledArrival') {
+          if (valA === '-') valA = '99:99';
+          if (valB === '-') valB = '99:99';
+        }
+
+        let result = valA.localeCompare(valB, 'tr');
+        return currentSortDirection === 'asc' ? result : -result;
+      });
+    }
+
+    // Sort column handler triggered from table header clicks
+    function handleSort(column) {
+      if (cachedFlights.length === 0) return;
+
+      if (currentSortColumn === column) {
+        currentSortDirection = currentSortDirection === 'asc' ? 'desc' : 'asc';
+      } else {
+        currentSortColumn = column;
+        currentSortDirection = 'asc';
+      }
+
+      updateSortIndicators();
+      sortFlights();
+      
+      currentPage = 1;
+      
+      renderFlightsTable();
+      renderPaginationControls();
+    }
+
+    // Render caret arrows next to column headers
+    function updateSortIndicators() {
+      const cols = ['flightNumber', 'airline', 'scheduledDeparture', 'scheduledArrival', 'actualTime', 'status'];
+      cols.forEach(col => {
+        const el = document.getElementById(`sort-${col}`);
+        if (!el) return;
+        
+        if (col === currentSortColumn) {
+          el.innerHTML = currentSortDirection === 'asc' ? '<i class="fa-solid fa-caret-up"></i>' : '<i class="fa-solid fa-caret-down"></i>';
+        } else {
+          el.innerHTML = '';
+        }
+      });
+    }
+
+    // Render flights table (paginated slice)
+    function renderFlightsTable() {
+      const tbody = document.getElementById('flights-table-body');
+      
+      const startIndex = (currentPage - 1) * itemsPerPage;
+      const pageFlights = cachedFlights.slice(startIndex, startIndex + itemsPerPage);
+
+      tbody.innerHTML = pageFlights.map((f, index) => {
+        const statusClass = getStatusClass(f.status);
+        const actualIndex = startIndex + index;
+        
+        return `
+          <tr onclick="showFlightDetails(${actualIndex})">
+            <td onclick="copyFlightNumber(event, '${f.flightNumber}')" style="font-family: var(--font-mono); font-weight: 700; color: var(--accent-cyan); cursor: copy;" title="Kopyalamak için tıklayın">${f.flightNumber}</td>
+            <td style="font-weight: 600;">${f.airline}</td>
+            <td style="font-family: var(--font-mono);">
+              <strong>${f.departureAirport}</strong> 
+              <i class="fa-solid fa-arrow-right" style="font-size: 0.75rem; color: var(--text-secondary); margin: 0 0.25rem;"></i> 
+              <strong>${f.arrivalAirport}</strong>
+            </td>
+            <td>${f.departureCity} &rarr; ${f.arrivalCity}</td>
+            <td style="font-family: var(--font-mono);">${f.scheduledDeparture}</td>
+            <td style="font-family: var(--font-mono);">${f.scheduledArrival}</td>
+            <td style="font-family: var(--font-mono); font-weight: 600; color: var(--accent-cyan);">${f.actualTime}</td>
+            <td style="font-family: var(--font-mono);">${f.terminal} / ${f.gate || '-'}</td>
+            <td><span class="status-pill ${statusClass}">${f.status}</span></td>
+          </tr>
+        `;
+      }).join('');
+    }
+
+    // Render pagination footer controls
+    function renderPaginationControls() {
+      const pagWrapper = document.getElementById('pagination-wrapper');
+      const infoEl = document.getElementById('pagination-info');
+      const controlsEl = document.getElementById('pagination-controls');
+
+      const totalItems = cachedFlights.length;
+      const totalPages = Math.ceil(totalItems / itemsPerPage);
+
+      if (totalItems === 0 || totalPages <= 1) {
+        pagWrapper.style.display = 'none';
+        return;
+      }
+
+      pagWrapper.style.display = 'flex';
+
+      const start = (currentPage - 1) * itemsPerPage + 1;
+      const end = Math.min(currentPage * itemsPerPage, totalItems);
+      infoEl.innerText = `${totalItems} uçuş arasından ${start}-${end} arası listeleniyor`;
+
+      let html = '';
+      
+      html += `<button class="pagination-btn" onclick="changePage(1)" ${currentPage === 1 ? 'disabled' : ''} title="İlk Sayfa"><i class="fa-solid fa-angles-left"></i></button>`;
+      html += `<button class="pagination-btn" onclick="changePage(${currentPage - 1})" ${currentPage === 1 ? 'disabled' : ''} title="Önceki"><i class="fa-solid fa-angle-left"></i></button>`;
+
+      const range = 2;
+      let startPage = Math.max(1, currentPage - range);
+      let endPage = Math.min(totalPages, currentPage + range);
+
+      if (startPage > 1) {
+        html += `<button class="pagination-btn" onclick="changePage(1)">1</button>`;
+        if (startPage > 2) html += `<span style="color: var(--text-secondary); padding: 0 0.25rem;">...</span>`;
+      }
+
+      for (let i = startPage; i <= endPage; i++) {
+        html += `<button class="pagination-btn ${i === currentPage ? 'active' : ''}" onclick="changePage(${i})">${i}</button>`;
+      }
+
+      if (endPage < totalPages) {
+        if (endPage < totalPages - 1) html += `<span style="color: var(--text-secondary); padding: 0 0.25rem;">...</span>`;
+        html += `<button class="pagination-btn" onclick="changePage(${totalPages})">${totalPages}</button>`;
+      }
+
+      html += `<button class="pagination-btn" onclick="changePage(${currentPage + 1})" ${currentPage === totalPages ? 'disabled' : ''} title="Sonraki"><i class="fa-solid fa-angle-right"></i></button>`;
+      html += `<button class="pagination-btn" onclick="changePage(${totalPages})" ${currentPage === totalPages ? 'disabled' : ''} title="Son Sayfa"><i class="fa-solid fa-angles-right"></i></button>`;
+
+      controlsEl.innerHTML = html;
+    }
+
+    // Change current active page
+    function changePage(page) {
+      currentPage = page;
+      renderFlightsTable();
+      renderPaginationControls();
+    }
+
+    // Update stats counters to general statistics
+    function updateQuickStats(flights) {
+      const departuresCount = flights.filter(f => f.scheduledDeparture !== '-').length;
+      const arrivalsCount = flights.filter(f => f.scheduledArrival !== '-').length;
+
+      document.getElementById('stat-total-flights').innerText = flights.length;
+      document.getElementById('stat-departures-count').innerText = departuresCount;
+      document.getElementById('stat-arrivals-count').innerText = arrivalsCount;
+    }
+
+    // Initial stats count based on database size
+    async function loadInitialStats() {
+      try {
+        const res = await fetch('/api/flights');
+        const data = await res.json();
+        if (data.success) {
+          updateQuickStats(data.flights);
+        }
+      } catch (e) {
+        console.error('Stats error:', e);
+      }
+    }
+
+    // Slide-out flight details drawer logic
+    function showFlightDetails(index) {
+      const f = cachedFlights[index];
+      if (!f) return;
+
+      document.getElementById('det-flight-num').innerText = f.flightNumber;
+      document.getElementById('det-airline').innerText = f.airline;
+      
+      const statusPill = document.getElementById('det-status-pill');
+      statusPill.innerText = f.status;
+      statusPill.className = `status-pill ${getStatusClass(f.status)}`;
+
+      document.getElementById('det-route-dep-iata').innerText = f.departureAirport;
+      document.getElementById('det-route-dep-city').innerText = f.departureCity;
+      document.getElementById('det-route-arr-iata').innerText = f.arrivalAirport;
+      document.getElementById('det-route-arr-city').innerText = f.arrivalCity;
+
+      document.getElementById('det-date').innerText = f.date;
+      document.getElementById('det-gate').innerText = `${f.terminal} / ${f.gate || '-'}`;
+      document.getElementById('det-scheduled-dep').innerText = f.scheduledDeparture;
+      document.getElementById('det-scheduled-arr').innerText = f.scheduledArrival;
+      document.getElementById('det-actual-time').innerText = f.actualTime;
+      document.getElementById('det-flight-type').innerText = f.scheduledDeparture !== '-' ? 'Kalkış (Departure)' : 'Varış (Arrival)';
+
+      const apiLink = `${window.location.origin}/api/flights/search?flightNumber=${f.flightNumber}&date=${f.date}`;
+      document.getElementById('det-api-link').innerText = apiLink;
+
+      document.getElementById('detail-panel').classList.add('open');
+    }
+
+    function closeDetailPanel() {
+      document.getElementById('detail-panel').classList.remove('open');
+    }
+
+    // Copy API endpoint path to clipboard
+    function copyPath(elementId) {
+      const pathText = document.getElementById(elementId).innerText;
+      const fullUrl = `${window.location.origin}${pathText}`;
+      
+      navigator.clipboard.writeText(fullUrl).then(() => {
+        const btn = document.querySelector(`#${elementId} ~ .copy-btn`);
+        const originalHtml = btn.innerHTML;
+        btn.innerHTML = '<i class="fa-solid fa-check" style="color: var(--accent-emerald)"></i>';
+        setTimeout(() => {
+          btn.innerHTML = originalHtml;
+        }, 1500);
+      }).catch(err => {
+        console.error('Kopyalama hatası:', err);
+      });
+    }
+
+    // JSON syntax highlighting
+    function syntaxHighlight(json) {
+      if (typeof json != 'string') {
+        json = JSON.stringify(json, undefined, 2);
+      }
+      json = json.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      return json.replace(/("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+-]?\d+)?)/g, function (match) {
+        var cls = 'number';
+        if (/^"/.test(match)) {
+          if (/:$/.test(match)) {
+            cls = 'key';
+          } else {
+            cls = 'string';
+          }
+        } else if (/true|false/.test(match)) {
+          cls = 'boolean';
+        } else if (/null/.test(match)) {
+          cls = 'null';
+        }
+        return '<span class="' + cls + '">' + match + '</span>';
+      });
+    }
+
+    // Test specific endpoint and display output
+    async function testEndpoint(endpoint) {
+      const outputEl = document.getElementById('json-output');
+      const statusEl = document.getElementById('console-status');
+      
+      statusEl.className = 'console-status';
+      statusEl.innerText = 'İstek gönderiliyor...';
+      outputEl.innerHTML = '// İstek gönderiliyor...';
+
+      let targetUrl = endpoint;
+      if (endpoint.includes('/api/flights/search') && !endpoint.includes('date=')) {
+        targetUrl = `${endpoint}&date=${getTodayDateString()}`;
+      }
+
+      const start = performance.now();
+      try {
+        const response = await fetch(targetUrl);
+        const data = await response.json();
+        const duration = Math.round(performance.now() - start);
+
+        statusEl.className = 'console-status status-active';
+        statusEl.innerHTML = `<i class="fa-solid fa-check"></i> 200 OK (${duration}ms)`;
+        outputEl.innerHTML = syntaxHighlight(data);
+      } catch (error) {
+        statusEl.className = 'console-status';
+        statusEl.style.color = '#ef4444';
+        statusEl.innerText = 'Hata Oluştu';
+        outputEl.innerHTML = '// Sunucuya bağlanırken hata oluştu:\n' + error.message;
+      }
+    }
+
+    // Copy flight number to clipboard with visual feedback
+    function copyFlightNumber(event, flightNum) {
+      event.stopPropagation();
+      navigator.clipboard.writeText(flightNum).then(() => {
+        const el = event.currentTarget;
+        const originalText = el.innerText;
+        el.innerHTML = `<span style="color: var(--accent-emerald); font-weight: bold;"><i class="fa-solid fa-check"></i> Kopyalandı</span>`;
+        setTimeout(() => {
+          el.innerText = originalText;
+        }, 1500);
+      }).catch(err => {
+        console.error('Kopyalama hatası:', err);
+      });
+    }
+
+    // Sandbox Tab Switching
+    let activeSandboxTab = 'search';
+
+    function switchSandboxTab(tab) {
+      activeSandboxTab = tab;
+      
+      const tabSearch = document.getElementById('sandbox-tab-search');
+      const tabRoute = document.getElementById('sandbox-tab-route');
+      const contentSearch = document.getElementById('sandbox-content-search');
+      const contentRoute = document.getElementById('sandbox-content-route');
+
+      if (tab === 'search') {
+        tabSearch.style.color = 'var(--accent-cyan)';
+        tabSearch.style.borderBottom = '2px solid var(--accent-cyan)';
+        tabRoute.style.color = 'var(--text-secondary)';
+        tabRoute.style.borderBottom = 'none';
+        contentSearch.style.display = 'block';
+        contentRoute.style.display = 'none';
+      } else {
+        tabRoute.style.color = 'var(--accent-cyan)';
+        tabRoute.style.borderBottom = '2px solid var(--accent-cyan)';
+        tabSearch.style.color = 'var(--text-secondary)';
+        tabSearch.style.borderBottom = 'none';
+        contentSearch.style.display = 'none';
+        contentRoute.style.display = 'block';
+        
+        // Populate sandbox dropdowns if empty
+        const depSelect = document.getElementById('sandbox-dep');
+        const arrSelect = document.getElementById('sandbox-arr');
+        if (depSelect.options.length <= 1) {
+          const mainDep = document.getElementById('search-departure');
+          Array.from(mainDep.options).forEach(opt => {
+            if (opt.value) {
+              const optDep = document.createElement('option');
+              optDep.value = opt.value;
+              optDep.innerText = opt.innerText;
+              depSelect.appendChild(optDep);
+
+              const optArr = document.createElement('option');
+              optArr.value = opt.value;
+              optArr.innerText = opt.innerText;
+              arrSelect.appendChild(optArr);
+            }
+          });
+        }
+      }
+    }
+
+    // Run Sandbox Test
+    async function runSandboxTest() {
+      let endpoint = '';
+      if (activeSandboxTab === 'search') {
+        const flightNum = document.getElementById('sandbox-flight').value.replace(/\s+/g, '').toUpperCase().trim();
+        const date = document.getElementById('sandbox-date-search').value;
+        if (!flightNum) {
+          alert('Lütfen bir uçuş numarası girin.');
+          return;
+        }
+        const params = new URLSearchParams();
+        params.append('flightNumber', flightNum);
+        if (date) params.append('date', date);
+        endpoint = `/api/flights/search?${params.toString()}`;
+      } else {
+        const dep = document.getElementById('sandbox-dep').value;
+        const arr = document.getElementById('sandbox-arr').value;
+        const date = document.getElementById('sandbox-date-route').value;
+        
+        const params = new URLSearchParams();
+        if (dep) params.append('departure', dep);
+        if (arr) params.append('arrival', arr);
+        if (date) params.append('date', date);
+        endpoint = `/api/flights?${params.toString()}`;
+      }
+      
+      document.getElementById('sandbox-url-preview').innerText = endpoint;
+      await testEndpoint(endpoint);
+    }
+
+    // Initialize board on load
+    window.addEventListener('DOMContentLoaded', async () => {
+      updateSortIndicators();
+      await loadAirportsDropdowns();
+      await loadInitialStats();
+      
+      // Default sandbox dates
+      document.getElementById('sandbox-date-search').value = getTodayDateString();
+      document.getElementById('sandbox-date-route').value = getTodayDateString();
+      
+      searchFlights();
+    });
+  </script>
+</body>
+</html>

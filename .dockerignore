@@ -1,0 +1,6 @@
+node_modules
+flights.db
+db.json
+*.log
+.git
+.gitignore
