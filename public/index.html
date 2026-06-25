@@ -185,6 +185,16 @@
                 <input type="date" id="sandbox-date-search" style="padding: 0.5rem 0.75rem; font-size: 0.85rem;">
               </div>
             </div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
+              <div class="input-group">
+                <label style="font-size: 0.65rem;" for="sandbox-departure-search">Kalkış Havalimanı IATA (Opsiyonel)</label>
+                <input type="text" id="sandbox-departure-search" placeholder="Örn: DNZ" style="padding: 0.5rem 0.75rem; font-size: 0.85rem; text-transform: uppercase;">
+              </div>
+              <div class="input-group">
+                <label style="font-size: 0.65rem;" for="sandbox-arrival-search">Varış Havalimanı IATA (Opsiyonel)</label>
+                <input type="text" id="sandbox-arrival-search" placeholder="Örn: SAW" style="padding: 0.5rem 0.75rem; font-size: 0.85rem; text-transform: uppercase;">
+              </div>
+            </div>
           </div>
 
           <!-- Tab Content: Route -->
@@ -615,7 +625,7 @@
       document.getElementById('det-actual-time').innerText = f.actualTime;
       document.getElementById('det-flight-type').innerText = f.scheduledDeparture !== '-' ? 'Kalkış (Departure)' : 'Varış (Arrival)';
 
-      const apiLink = `${window.location.origin}/api/flights/search?flightNumber=${f.flightNumber}&date=${f.date}`;
+      const apiLink = `${window.location.origin}/api/flights/search?flightNumber=${f.flightNumber}&date=${f.date}&departure=${f.departureAirport}&arrival=${f.arrivalAirport}`;
       document.getElementById('det-api-link').innerText = apiLink;
 
       document.getElementById('detail-panel').classList.add('open');
@@ -765,6 +775,8 @@
       if (activeSandboxTab === 'search') {
         const flightNum = document.getElementById('sandbox-flight').value.replace(/\s+/g, '').toUpperCase().trim();
         const date = document.getElementById('sandbox-date-search').value;
+        const departure = document.getElementById('sandbox-departure-search').value.toUpperCase().trim();
+        const arrival = document.getElementById('sandbox-arrival-search').value.toUpperCase().trim();
         if (!flightNum) {
           alert('Lütfen bir uçuş numarası girin.');
           return;
@@ -772,6 +784,8 @@
         const params = new URLSearchParams();
         params.append('flightNumber', flightNum);
         if (date) params.append('date', date);
+        if (departure) params.append('departure', departure);
+        if (arrival) params.append('arrival', arrival);
         endpoint = `/api/flights/search?${params.toString()}`;
       } else {
         const dep = document.getElementById('sandbox-dep').value;
