@@ -786,8 +786,19 @@ app.get('/api/flights/search', (req, res) => {
 
   const datesToSearch = [dateStr, formatDate(prevDate), formatDate(nextDate)];
 
-  const query = "SELECT * FROM flights WHERE flightNumber = ? AND date IN (?, ?, ?)";
-  db.all(query, [flightNumber, ...datesToSearch], (err, rows) => {
+  let query = "SELECT * FROM flights WHERE flightNumber = ? AND date IN (?, ?, ?)";
+  const params = [flightNumber, ...datesToSearch];
+
+  if (req.query.departure) {
+    query += " AND departureAirport = ?";
+    params.push(req.query.departure.toUpperCase().trim());
+  }
+  if (req.query.arrival) {
+    query += " AND arrivalAirport = ?";
+    params.push(req.query.arrival.toUpperCase().trim());
+  }
+
+  db.all(query, params, (err, rows) => {
     if (err) {
       return res.status(500).json({ success: false, error: err.message });
     }
