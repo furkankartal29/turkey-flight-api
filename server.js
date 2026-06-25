@@ -182,6 +182,35 @@ function findAirportCodeByCity(cityName) {
   return null;
 }
 
+// Helper to adjust SAW flight date dynamically for post-midnight/pre-midnight schedules
+function getCorrectFlightDate(baseDateStr, flightTimeStr) {
+  if (!flightTimeStr || flightTimeStr === '-') return baseDateStr;
+  
+  const [flightHour, flightMin] = flightTimeStr.split(':').map(Number);
+  if (isNaN(flightHour)) return baseDateStr;
+  
+  const now = new Date();
+  const currentHour = now.getHours();
+  
+  let targetDate = new Date(baseDateStr);
+  
+  // If scraper runs late at night (e.g. 20:00 - 23:59) and the flight is early morning (e.g. 00:00 - 04:00)
+  if (currentHour >= 20 && flightHour <= 4) {
+    targetDate.setDate(targetDate.getDate() + 1);
+  } 
+  // If scraper runs early in the morning (e.g. 00:00 - 04:00) and the flight is late at night (e.g. 20:00 - 23:59)
+  else if (currentHour <= 4 && flightHour >= 20) {
+    targetDate.setDate(targetDate.getDate() - 1);
+  } else {
+    return baseDateStr;
+  }
+  
+  const year = targetDate.getFullYear();
+  const month = String(targetDate.getMonth() + 1).padStart(2, '0');
+  const day = String(targetDate.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
 // Parser for Sabiha Gökçen flight table
 function parseSawTable(html, type, todayStr) {
   const isDeparture = type === 'departures';
@@ -226,7 +255,7 @@ function parseSawTable(html, type, todayStr) {
 
       flights.push({
         flightNumber: flightNum,
-        date: todayStr,
+        date: getCorrectFlightDate(todayStr, scheduled),
         airline: airline || getAirlineName(flightNum),
         departureAirport: depIata,
         arrivalAirport: arrIata,
