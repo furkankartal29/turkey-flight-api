@@ -76,29 +76,38 @@ const db = new sqlite3.Database(DB_PATH, (err) => {
 
 function initializeDatabase() {
   db.serialize(() => {
-    db.run(`
-      CREATE TABLE IF NOT EXISTS flights (
-        flightNumber TEXT,
-        date TEXT,
-        airline TEXT,
-        departureAirport TEXT,
-        arrivalAirport TEXT,
-        departureCity TEXT,
-        arrivalCity TEXT,
-        scheduledDeparture TEXT,
-        scheduledArrival TEXT,
-        actualTime TEXT,
-        terminal TEXT,
-        gate TEXT,
-        status TEXT,
-        PRIMARY KEY (flightNumber, date, departureAirport, arrivalAirport)
-      )
-    `);
+    // Drop table if it has the old actualTime column to perform automatic schema migration
+    db.all("PRAGMA table_info(flights)", [], (err, columns) => {
+      if (!err && columns && columns.some(c => c.name === 'actualTime')) {
+        console.log('Eski şema (actualTime) tespit edildi, tablo yeniden oluşturuluyor...');
+        db.run("DROP TABLE flights");
+      }
+      
+      db.run(`
+        CREATE TABLE IF NOT EXISTS flights (
+          flightNumber TEXT,
+          date TEXT,
+          airline TEXT,
+          departureAirport TEXT,
+          arrivalAirport TEXT,
+          departureCity TEXT,
+          arrivalCity TEXT,
+          scheduledDeparture TEXT,
+          scheduledArrival TEXT,
+          actualDeparture TEXT,
+          actualArrival TEXT,
+          terminal TEXT,
+          gate TEXT,
+          status TEXT,
+          PRIMARY KEY (flightNumber, date, departureAirport, arrivalAirport)
+        )
+      `);
 
-    db.run("CREATE INDEX IF NOT EXISTS idx_flights_search ON flights (flightNumber, date)");
-    db.run("CREATE INDEX IF NOT EXISTS idx_flights_route ON flights (departureAirport, arrivalAirport, date)");
-    db.run("CREATE INDEX IF NOT EXISTS idx_flights_date ON flights (date)");
-    console.log('Veritabanı tabloları ve indeksleri doğrulandı.');
+      db.run("CREATE INDEX IF NOT EXISTS idx_flights_search ON flights (flightNumber, date)");
+      db.run("CREATE INDEX IF NOT EXISTS idx_flights_route ON flights (departureAirport, arrivalAirport, date)");
+      db.run("CREATE INDEX IF NOT EXISTS idx_flights_date ON flights (date)");
+      console.log('Veritabanı tabloları ve indeksleri doğrulandı.');
+    });
   });
 }
 
@@ -287,7 +296,8 @@ function parseSawTable(html, type, todayStr) {
         arrivalCity: getAirportCity(arrIata) || (isDeparture ? cityRaw : "İstanbul"),
         scheduledDeparture: isDeparture ? scheduled : "-",
         scheduledArrival: isDeparture ? "-" : scheduled,
-        actualTime: estimated || scheduled,
+        actualDeparture: isDeparture ? (estimated || scheduled) : "-",
+        actualArrival: isDeparture ? "-" : (estimated || scheduled),
         terminal: 'Ana Terminal',
         gate: gate,
         status: status || "Planlandı"
@@ -358,7 +368,7 @@ async function fetchIstFlights(nature, todayStr) {
               const depIata = item.fromCityCode || (nature === 1 ? "IST" : "-");
               const arrIata = item.toCityCode || (nature === 1 ? "-" : "IST");
 
-              flights.push({
+              const flightObj = {
                 flightNumber: flightNum,
                 date: date,
                 airline: item.airlineName || getAirlineName(flightNum),
@@ -368,11 +378,27 @@ async function fetchIstFlights(nature, todayStr) {
                 arrivalCity: getAirportCity(arrIata) || item.toCityName,
                 scheduledDeparture: nature === 1 ? formatIsoTime(item.scheduledDatetime) : "-",
                 scheduledArrival: nature === 0 ? formatIsoTime(item.scheduledDatetime) : "-",
-                actualTime: formatIsoTime(item.estimatedDatetime || item.scheduledDatetime),
+                actualDeparture: nature === 1 ? formatIsoTime(item.estimatedDatetime || item.scheduledDatetime) : "-",
+                actualArrival: nature === 0 ? formatIsoTime(item.estimatedDatetime || item.scheduledDatetime) : "-",
                 terminal: item.gate && item.gate.startsWith('G') ? 'T1' : 'Ana Terminal',
                 gate: item.gate || "-",
                 status: item.remark || "Planlandı"
-              });
+              };
+              flights.push(flightObj);
+
+              // Expand codeshares
+              if (Array.isArray(item.codeshare)) {
+                item.codeshare.forEach(csNum => {
+                  if (csNum) {
+                    const cleanCsNum = csNum.replace(/\s+/g, '').toUpperCase();
+                    flights.push({
+                      ...flightObj,
+                      flightNumber: cleanCsNum,
+                      airline: getAirlineName(cleanCsNum)
+                    });
+                  }
+                });
+              }
             });
           }
         }
@@ -537,7 +563,8 @@ async function fetchDhmiFlights(todayStr) {
                   arrivalCity: getAirportCity(arrIata) || (isDeparture ? item.SrcDst : getAirportCity(ap.iata)),
                   scheduledDeparture: isDeparture ? item.Planned : "-",
                   scheduledArrival: isDeparture ? "-" : item.Planned,
-                  actualTime: item.Estimated || item.Planned,
+                  actualDeparture: isDeparture ? (item.Estimated || item.Planned) : "-",
+                  actualArrival: isDeparture ? "-" : (item.Estimated || item.Planned),
                   terminal: 'Ana Terminal',
                   gate: item.Gate || "-",
                   status: status
@@ -574,20 +601,27 @@ function persistFlights(newFlights) {
       INSERT INTO flights (
         flightNumber, date, airline, departureAirport, arrivalAirport,
         departureCity, arrivalCity, scheduledDeparture, scheduledArrival,
-        actualTime, terminal, gate, status
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        actualDeparture, actualArrival, terminal, gate, status
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(flightNumber, date, departureAirport, arrivalAirport) DO UPDATE SET
         airline = CASE WHEN excluded.airline != 'Diğer Havayolu' AND excluded.airline != '' THEN excluded.airline ELSE flights.airline END,
         departureCity = CASE WHEN excluded.departureCity != '' AND excluded.departureCity IS NOT NULL THEN excluded.departureCity ELSE flights.departureCity END,
         arrivalCity = CASE WHEN excluded.arrivalCity != '' AND excluded.arrivalCity IS NOT NULL THEN excluded.arrivalCity ELSE flights.arrivalCity END,
         scheduledDeparture = CASE WHEN excluded.scheduledDeparture != '-' AND excluded.scheduledDeparture != '' AND excluded.scheduledDeparture IS NOT NULL THEN excluded.scheduledDeparture ELSE flights.scheduledDeparture END,
         scheduledArrival = CASE WHEN excluded.scheduledArrival != '-' AND excluded.scheduledArrival != '' AND excluded.scheduledArrival IS NOT NULL THEN excluded.scheduledArrival ELSE flights.scheduledArrival END,
-        actualTime = CASE 
+        actualDeparture = CASE 
           WHEN (UPPER(flights.status) LIKE '%İNDİ%' OR UPPER(flights.status) LIKE '%LANDED%' OR UPPER(flights.status) LIKE '%İPTAL%' OR UPPER(flights.status) LIKE '%CANCEL%')
                AND (UPPER(excluded.status) NOT LIKE '%İNDİ%' AND UPPER(excluded.status) NOT LIKE '%LANDED%' AND UPPER(excluded.status) NOT LIKE '%İPTAL%' AND UPPER(excluded.status) NOT LIKE '%CANCEL%')
-               THEN flights.actualTime
-          WHEN excluded.actualTime != '-' AND excluded.actualTime != '' AND excluded.actualTime IS NOT NULL THEN excluded.actualTime
-          ELSE flights.actualTime
+               THEN flights.actualDeparture
+          WHEN excluded.actualDeparture != '-' AND excluded.actualDeparture != '' AND excluded.actualDeparture IS NOT NULL THEN excluded.actualDeparture
+          ELSE flights.actualDeparture
+        END,
+        actualArrival = CASE 
+          WHEN (UPPER(flights.status) LIKE '%İNDİ%' OR UPPER(flights.status) LIKE '%LANDED%' OR UPPER(flights.status) LIKE '%İPTAL%' OR UPPER(flights.status) LIKE '%CANCEL%')
+               AND (UPPER(excluded.status) NOT LIKE '%İNDİ%' AND UPPER(excluded.status) NOT LIKE '%LANDED%' AND UPPER(excluded.status) NOT LIKE '%İPTAL%' AND UPPER(excluded.status) NOT LIKE '%CANCEL%')
+               THEN flights.actualArrival
+          WHEN excluded.actualArrival != '-' AND excluded.actualArrival != '' AND excluded.actualArrival IS NOT NULL THEN excluded.actualArrival
+          ELSE flights.actualArrival
         END,
         terminal = CASE WHEN excluded.terminal != 'Ana Terminal' AND excluded.terminal != '-' AND excluded.terminal != '' AND excluded.terminal IS NOT NULL THEN excluded.terminal ELSE flights.terminal END,
         gate = CASE WHEN excluded.gate != '-' AND excluded.gate != '' AND excluded.gate IS NOT NULL THEN excluded.gate ELSE flights.gate END,
@@ -603,7 +637,7 @@ function persistFlights(newFlights) {
       stmt.run([
         f.flightNumber, f.date, f.airline, f.departureAirport, f.arrivalAirport,
         f.departureCity, f.arrivalCity, f.scheduledDeparture, f.scheduledArrival,
-        f.actualTime, f.terminal, f.gate, f.status
+        f.actualDeparture, f.actualArrival, f.terminal, f.gate, f.status
       ]);
     });
     stmt.finalize();
@@ -799,7 +833,7 @@ app.get('/api/flights', (req, res) => {
 
   // Delayed Filter
   if (req.query.delayed === 'true') {
-    query += " AND ((scheduledDeparture != '-' AND actualTime > scheduledDeparture) OR (scheduledArrival != '-' AND actualTime > scheduledArrival) OR status LIKE '%Gecikme%' OR status LIKE '%Rötar%' OR status LIKE '%Delay%')";
+    query += " AND ((scheduledDeparture != '-' AND actualDeparture > scheduledDeparture) OR (scheduledArrival != '-' AND actualArrival > scheduledArrival) OR status LIKE '%Gecikme%' OR status LIKE '%Rötar%' OR status LIKE '%Delay%')";
   }
 
   db.all(query, params, (err, rows) => {
@@ -807,9 +841,13 @@ app.get('/api/flights', (req, res) => {
       return res.status(500).json({ success: false, error: err.message });
     }
     const flightsWithDelay = rows.map(r => {
-      const sched = r.scheduledDeparture !== '-' ? r.scheduledDeparture : r.scheduledArrival;
-      const delay = calculateDelayMinutes(sched, r.actualTime);
-      return { ...r, delayMinutes: delay };
+      const depDelay = calculateDelayMinutes(r.scheduledDeparture, r.actualDeparture);
+      const arrDelay = calculateDelayMinutes(r.scheduledArrival, r.actualArrival);
+      return { 
+        ...r, 
+        departureDelayMinutes: depDelay,
+        arrivalDelayMinutes: arrDelay 
+      };
     });
     res.json({
       success: true,
@@ -925,8 +963,11 @@ app.get('/api/flights/search', (req, res) => {
             if (next.scheduledArrival !== '-') {
               current.scheduledArrival = next.scheduledArrival;
             }
-            if (next.actualTime !== '-' && next.actualTime !== next.scheduledDeparture) {
-              current.actualTime = next.actualTime;
+            if (next.actualDeparture !== '-' && next.actualDeparture !== '') {
+              current.actualDeparture = next.actualDeparture;
+            }
+            if (next.actualArrival !== '-' && next.actualArrival !== '') {
+              current.actualArrival = next.actualArrival;
             }
             if (next.gate !== '-' && current.gate === '-') {
               current.gate = next.gate;
@@ -954,9 +995,13 @@ app.get('/api/flights/search', (req, res) => {
     }
 
     const processedRowsWithDelay = processedRows.map(r => {
-      const sched = r.scheduledDeparture !== '-' ? r.scheduledDeparture : r.scheduledArrival;
-      const delay = calculateDelayMinutes(sched, r.actualTime);
-      return { ...r, delayMinutes: delay };
+      const depDelay = calculateDelayMinutes(r.scheduledDeparture, r.actualDeparture);
+      const arrDelay = calculateDelayMinutes(r.scheduledArrival, r.actualArrival);
+      return { 
+        ...r, 
+        departureDelayMinutes: depDelay,
+        arrivalDelayMinutes: arrDelay 
+      };
     });
 
     // Find the best match for the requested dateStr

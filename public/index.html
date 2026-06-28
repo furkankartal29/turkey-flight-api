@@ -98,14 +98,13 @@
               <th>Şehirler</th>
               <th onclick="handleSort('scheduledDeparture')">Kalkış Saati <span id="sort-scheduledDeparture"></span></th>
               <th onclick="handleSort('scheduledArrival')">Varış Saati <span id="sort-scheduledArrival"></span></th>
-              <th onclick="handleSort('actualTime')">Beklenen Zaman <span id="sort-actualTime"></span></th>
               <th>Terminal/Kapı</th>
               <th onclick="handleSort('status')">Durum <span id="sort-status"></span></th>
             </tr>
           </thead>
           <tbody id="flights-table-body">
             <tr>
-              <td colspan="9" style="text-align: center; color: var(--text-secondary); padding: 2rem;">Arama kriterlerini belirleyip "Uçuşları Ara" butonuna basın.</td>
+              <td colspan="8" style="text-align: center; color: var(--text-secondary); padding: 2rem;">Arama kriterlerini belirleyip "Uçuşları Ara" butonuna basın.</td>
             </tr>
           </tbody>
         </table>
@@ -277,16 +276,12 @@
         <div class="detail-val" id="det-gate">-</div>
       </div>
       <div>
-        <div class="detail-label">Planlanan Kalkış</div>
-        <div class="detail-val" id="det-scheduled-dep">-</div>
+        <div class="detail-label">Kalkış (Planlanan / Beklenen)</div>
+        <div class="detail-val" id="det-kalkis-val">-</div>
       </div>
       <div>
-        <div class="detail-label">Planlanan Varış</div>
-        <div class="detail-val" id="det-scheduled-arr">-</div>
-      </div>
-      <div>
-        <div class="detail-label">Gerçekleşen/Beklenen</div>
-        <div class="detail-val" id="det-actual-time" style="color: var(--accent-cyan);">-</div>
+        <div class="detail-label">Varış (Planlanan / Beklenen)</div>
+        <div class="detail-val" id="det-varis-val">-</div>
       </div>
       <div>
         <div class="detail-label">Uçuş Tipi</div>
@@ -331,6 +326,38 @@
       if (s.includes('gecikme') || s.includes('delayed')) return 'gecikme';
       if (s.includes('iptal') || s.includes('cancelled')) return 'iptal';
       return 'planlandi';
+    }
+
+    // Helper to format scheduled time and display delay estimated time with badges
+    function formatTimeWithDelay(scheduled, delayMin) {
+      if (scheduled === '-') return '-';
+      if (!delayMin || delayMin <= 0) return scheduled;
+      
+      const [h, m] = scheduled.split(':').map(Number);
+      if (isNaN(h)) return scheduled;
+      
+      let estMin = h * 60 + m + delayMin;
+      const estH = String(Math.floor(estMin / 60) % 24).padStart(2, '0');
+      const estM = String(estMin % 60).padStart(2, '0');
+      
+      let delayText = '';
+      if (delayMin >= 60) {
+        const hrs = Math.floor(delayMin / 60);
+        const mins = delayMin % 60;
+        delayText = `+${hrs}sa${mins > 0 ? mins + 'dk' : ''}`;
+      } else {
+        delayText = `+${delayMin}dk`;
+      }
+      
+      return `
+        <div style="font-weight: 700; color: var(--accent-cyan); display: flex; align-items: center; gap: 0.25rem;">
+          ${estH}:${estM}
+          <span class="delay-badge">${delayText}</span>
+        </div>
+        <div style="font-size: 0.72rem; color: var(--text-secondary); text-decoration: line-through; margin-top: 0.1rem;">
+          ${scheduled}
+        </div>
+      `;
     }
 
     // Populate airport dropdowns on load
@@ -478,7 +505,7 @@
 
     // Render caret arrows next to column headers
     function updateSortIndicators() {
-      const cols = ['flightNumber', 'airline', 'scheduledDeparture', 'scheduledArrival', 'actualTime', 'status'];
+      const cols = ['flightNumber', 'airline', 'scheduledDeparture', 'scheduledArrival', 'status'];
       cols.forEach(col => {
         const el = document.getElementById(`sort-${col}`);
         if (!el) return;
@@ -502,29 +529,8 @@
         const statusClass = getStatusClass(f.status);
         const actualIndex = startIndex + index;
         
-        // Calculate delay in minutes
-        let delayBadge = '';
-        const sched = f.scheduledDeparture !== '-' ? f.scheduledDeparture : f.scheduledArrival;
-        if (sched !== '-' && f.actualTime !== '-' && f.actualTime !== sched) {
-          const [sH, sM] = sched.split(':').map(Number);
-          const [aH, aM] = f.actualTime.split(':').map(Number);
-          if (!isNaN(sH) && !isNaN(aH)) {
-            let diffMin = (aH * 60 + aM) - (sH * 60 + sM);
-            // Handle day rollover (e.g. sched 23:50, actual 00:15)
-            if (diffMin < -180) {
-              diffMin += 24 * 60;
-            }
-            if (diffMin > 0) {
-              if (diffMin >= 60) {
-                const hrs = Math.floor(diffMin / 60);
-                const mins = diffMin % 60;
-                delayBadge = `<span class="delay-badge">+${hrs}sa ${mins > 0 ? mins + 'dk' : ''}</span>`;
-              } else {
-                delayBadge = `<span class="delay-badge">+${diffMin}dk</span>`;
-              }
-            }
-          }
-        }
+        const depHtml = formatTimeWithDelay(f.scheduledDeparture, f.departureDelayMinutes);
+        const arrHtml = formatTimeWithDelay(f.scheduledArrival, f.arrivalDelayMinutes);
         
         return `
           <tr onclick="showFlightDetails(${actualIndex})">
@@ -536,9 +542,8 @@
               <strong>${f.arrivalAirport}</strong>
             </td>
             <td>${f.departureCity} &rarr; ${f.arrivalCity}</td>
-            <td style="font-family: var(--font-mono);">${f.scheduledDeparture}</td>
-            <td style="font-family: var(--font-mono);">${f.scheduledArrival}</td>
-            <td style="font-family: var(--font-mono); font-weight: 600; color: var(--accent-cyan);">${f.actualTime} ${delayBadge}</td>
+            <td style="font-family: var(--font-mono);">${depHtml}</td>
+            <td style="font-family: var(--font-mono);">${arrHtml}</td>
             <td style="font-family: var(--font-mono);">${f.terminal} / ${f.gate || '-'}</td>
             <td><span class="status-pill ${statusClass}">${f.status}</span></td>
           </tr>
@@ -644,10 +649,37 @@
 
       document.getElementById('det-date').innerText = f.date;
       document.getElementById('det-gate').innerText = `${f.terminal} / ${f.gate || '-'}`;
-      document.getElementById('det-scheduled-dep').innerText = f.scheduledDeparture;
-      document.getElementById('det-scheduled-arr').innerText = f.scheduledArrival;
-      document.getElementById('det-actual-time').innerText = f.actualTime;
       document.getElementById('det-flight-type').innerText = f.scheduledDeparture !== '-' ? 'Kalkış (Departure)' : 'Varış (Arrival)';
+
+      // Departure Details
+      if (f.scheduledDeparture !== '-') {
+        if (f.departureDelayMinutes > 0) {
+          const [h, m] = f.scheduledDeparture.split(':').map(Number);
+          const estMin = h * 60 + m + f.departureDelayMinutes;
+          const estH = String(Math.floor(estMin / 60) % 24).padStart(2, '0');
+          const estM = String(estMin % 60).padStart(2, '0');
+          document.getElementById('det-kalkis-val').innerHTML = `${f.scheduledDeparture} <i class="fa-solid fa-arrow-right" style="font-size: 0.8rem; margin: 0 0.25rem;"></i> <span style="color: var(--accent-cyan); font-weight: 700;">${estH}:${estM}</span> <span class="delay-badge">+${f.departureDelayMinutes}dk</span>`;
+        } else {
+          document.getElementById('det-kalkis-val').innerHTML = f.scheduledDeparture;
+        }
+      } else {
+        document.getElementById('det-kalkis-val').innerText = '-';
+      }
+
+      // Arrival Details
+      if (f.scheduledArrival !== '-') {
+        if (f.arrivalDelayMinutes > 0) {
+          const [h, m] = f.scheduledArrival.split(':').map(Number);
+          const estMin = h * 60 + m + f.arrivalDelayMinutes;
+          const estH = String(Math.floor(estMin / 60) % 24).padStart(2, '0');
+          const estM = String(estMin % 60).padStart(2, '0');
+          document.getElementById('det-varis-val').innerHTML = `${f.scheduledArrival} <i class="fa-solid fa-arrow-right" style="font-size: 0.8rem; margin: 0 0.25rem;"></i> <span style="color: var(--accent-cyan); font-weight: 700;">${estH}:${estM}</span> <span class="delay-badge">+${f.arrivalDelayMinutes}dk</span>`;
+        } else {
+          document.getElementById('det-varis-val').innerHTML = f.scheduledArrival;
+        }
+      } else {
+        document.getElementById('det-varis-val').innerText = '-';
+      }
 
       const apiLink = `${window.location.origin}/api/flights/search?flightNumber=${f.flightNumber}&date=${f.date}&departure=${f.departureAirport}&arrival=${f.arrivalAirport}`;
       document.getElementById('det-api-link').innerText = apiLink;
