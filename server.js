@@ -217,6 +217,24 @@ function getCorrectFlightDate(baseDateStr, flightTimeStr) {
   return `${year}-${month}-${day}`;
 }
 
+// Helper to calculate delay in minutes, handling midnight rollover
+function calculateDelayMinutes(scheduled, actual) {
+  if (!scheduled || scheduled === '-' || !actual || actual === '-') return 0;
+  
+  const [sH, sM] = scheduled.split(':').map(Number);
+  const [aH, aM] = actual.split(':').map(Number);
+  
+  if (isNaN(sH) || isNaN(aH)) return 0;
+  
+  let diffMin = (aH * 60 + aM) - (sH * 60 + sM);
+  
+  if (diffMin < -180) { // Roll over midnight
+    diffMin += 24 * 60;
+  }
+  
+  return diffMin > 0 ? diffMin : 0;
+}
+
 // Parser for Sabiha Gökçen flight table
 function parseSawTable(html, type, todayStr) {
   const isDeparture = type === 'departures';
@@ -779,15 +797,25 @@ app.get('/api/flights', (req, res) => {
   query += " AND date = ?";
   params.push(dateStr);
 
+  // Delayed Filter
+  if (req.query.delayed === 'true') {
+    query += " AND ((scheduledDeparture != '-' AND actualTime > scheduledDeparture) OR (scheduledArrival != '-' AND actualTime > scheduledArrival) OR status LIKE '%Gecikme%' OR status LIKE '%Rötar%' OR status LIKE '%Delay%')";
+  }
+
   db.all(query, params, (err, rows) => {
     if (err) {
       return res.status(500).json({ success: false, error: err.message });
     }
+    const flightsWithDelay = rows.map(r => {
+      const sched = r.scheduledDeparture !== '-' ? r.scheduledDeparture : r.scheduledArrival;
+      const delay = calculateDelayMinutes(sched, r.actualTime);
+      return { ...r, delayMinutes: delay };
+    });
     res.json({
       success: true,
-      count: rows.length,
+      count: flightsWithDelay.length,
       timestamp: new Date().toISOString(),
-      flights: rows
+      flights: flightsWithDelay
     });
   });
 });
@@ -925,10 +953,16 @@ app.get('/api/flights/search', (req, res) => {
       processedRows.push(current);
     }
 
+    const processedRowsWithDelay = processedRows.map(r => {
+      const sched = r.scheduledDeparture !== '-' ? r.scheduledDeparture : r.scheduledArrival;
+      const delay = calculateDelayMinutes(sched, r.actualTime);
+      return { ...r, delayMinutes: delay };
+    });
+
     // Find the best match for the requested dateStr
-    let bestMatch = processedRows.find(f => f.date === dateStr);
-    if (!bestMatch && processedRows.length > 0) {
-      bestMatch = processedRows[0];
+    let bestMatch = processedRowsWithDelay.find(f => f.date === dateStr);
+    if (!bestMatch && processedRowsWithDelay.length > 0) {
+      bestMatch = processedRowsWithDelay[0];
     }
 
     res.json({
@@ -937,8 +971,8 @@ app.get('/api/flights/search', (req, res) => {
         flightNumber: flightNumber,
         date: dateStr
       },
-      count: processedRows.length,
-      flights: processedRows,
+      count: processedRowsWithDelay.length,
+      flights: processedRowsWithDelay,
       flight: bestMatch
     });
   });

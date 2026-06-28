@@ -502,6 +502,30 @@
         const statusClass = getStatusClass(f.status);
         const actualIndex = startIndex + index;
         
+        // Calculate delay in minutes
+        let delayBadge = '';
+        const sched = f.scheduledDeparture !== '-' ? f.scheduledDeparture : f.scheduledArrival;
+        if (sched !== '-' && f.actualTime !== '-' && f.actualTime !== sched) {
+          const [sH, sM] = sched.split(':').map(Number);
+          const [aH, aM] = f.actualTime.split(':').map(Number);
+          if (!isNaN(sH) && !isNaN(aH)) {
+            let diffMin = (aH * 60 + aM) - (sH * 60 + sM);
+            // Handle day rollover (e.g. sched 23:50, actual 00:15)
+            if (diffMin < -180) {
+              diffMin += 24 * 60;
+            }
+            if (diffMin > 0) {
+              if (diffMin >= 60) {
+                const hrs = Math.floor(diffMin / 60);
+                const mins = diffMin % 60;
+                delayBadge = `<span class="delay-badge">+${hrs}sa ${mins > 0 ? mins + 'dk' : ''}</span>`;
+              } else {
+                delayBadge = `<span class="delay-badge">+${diffMin}dk</span>`;
+              }
+            }
+          }
+        }
+        
         return `
           <tr onclick="showFlightDetails(${actualIndex})">
             <td onclick="copyFlightNumber(event, '${f.flightNumber}')" style="font-family: var(--font-mono); font-weight: 700; color: var(--accent-cyan); cursor: copy;" title="Kopyalamak için tıklayın">${f.flightNumber}</td>
@@ -514,7 +538,7 @@
             <td>${f.departureCity} &rarr; ${f.arrivalCity}</td>
             <td style="font-family: var(--font-mono);">${f.scheduledDeparture}</td>
             <td style="font-family: var(--font-mono);">${f.scheduledArrival}</td>
-            <td style="font-family: var(--font-mono); font-weight: 600; color: var(--accent-cyan);">${f.actualTime}</td>
+            <td style="font-family: var(--font-mono); font-weight: 600; color: var(--accent-cyan);">${f.actualTime} ${delayBadge}</td>
             <td style="font-family: var(--font-mono);">${f.terminal} / ${f.gate || '-'}</td>
             <td><span class="status-pill ${statusClass}">${f.status}</span></td>
           </tr>
@@ -635,6 +659,56 @@
       document.getElementById('detail-panel').classList.remove('open');
     }
 
+    // Toast Notification helper
+    function showToast(message) {
+      let container = document.getElementById('toast-container');
+      if (!container) {
+        container = document.createElement('div');
+        container.id = 'toast-container';
+        container.style.position = 'fixed';
+        container.style.bottom = '2rem';
+        container.style.right = '2rem';
+        container.style.zIndex = '9999';
+        container.style.display = 'flex';
+        container.style.flexDirection = 'column';
+        container.style.gap = '0.5rem';
+        document.body.appendChild(container);
+      }
+      
+      const toast = document.createElement('div');
+      toast.className = 'toast-notification';
+      toast.innerHTML = `<i class="fa-solid fa-circle-check" style="color: var(--accent-emerald); margin-right: 0.5rem;"></i> ${message}`;
+      
+      toast.style.background = '#0f172a';
+      toast.style.color = '#ffffff';
+      toast.style.padding = '0.75rem 1.25rem';
+      toast.style.borderRadius = '8px';
+      toast.style.boxShadow = '0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)';
+      toast.style.fontFamily = 'var(--font-sans)';
+      toast.style.fontSize = '0.85rem';
+      toast.style.fontWeight = '600';
+      toast.style.display = 'flex';
+      toast.style.alignItems = 'center';
+      toast.style.opacity = '0';
+      toast.style.transform = 'translateY(1rem)';
+      toast.style.transition = 'all 0.3s ease';
+      
+      container.appendChild(toast);
+      
+      setTimeout(() => {
+        toast.style.opacity = '1';
+        toast.style.transform = 'translateY(0)';
+      }, 10);
+      
+      setTimeout(() => {
+        toast.style.opacity = '0';
+        toast.style.transform = 'translateY(-1rem)';
+        setTimeout(() => {
+          toast.remove();
+        }, 300);
+      }, 2200);
+    }
+
     // Copy API endpoint path to clipboard
     function copyPath(elementId) {
       const pathText = document.getElementById(elementId).innerText;
@@ -644,6 +718,7 @@
         const btn = document.querySelector(`#${elementId} ~ .copy-btn`);
         const originalHtml = btn.innerHTML;
         btn.innerHTML = '<i class="fa-solid fa-check" style="color: var(--accent-emerald)"></i>';
+        showToast('API Bağlantısı Kopyalandı!');
         setTimeout(() => {
           btn.innerHTML = originalHtml;
         }, 1500);
@@ -713,6 +788,7 @@
         const el = event.currentTarget;
         const originalText = el.innerText;
         el.innerHTML = `<span style="color: var(--accent-emerald); font-weight: bold;"><i class="fa-solid fa-check"></i> Kopyalandı</span>`;
+        showToast(`Uçuş Kodu Kopyalandı: ${flightNum}`);
         setTimeout(() => {
           el.innerText = originalText;
         }, 1500);
