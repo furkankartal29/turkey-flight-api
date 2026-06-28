@@ -233,22 +233,57 @@ function getCorrectFlightDate(baseDateStr, flightTimeStr) {
   return `${year}-${month}-${day}`;
 }
 
-// Helper to calculate delay in minutes, handling midnight rollover
-function calculateDelayMinutes(scheduled, actual) {
-  if (!scheduled || scheduled === '-' || !actual || actual === '-') return 0;
+// Helper to calculate delay in minutes using full ISO datetimes
+function calculateDelayMinutes(scheduledIso, actualIso) {
+  if (!scheduledIso || scheduledIso === '-' || !actualIso || actualIso === '-') return 0;
   
-  const [sH, sM] = scheduled.split(':').map(Number);
-  const [aH, aM] = actual.split(':').map(Number);
+  const schedDate = new Date(scheduledIso);
+  const actualDate = new Date(actualIso);
   
-  if (isNaN(sH) || isNaN(aH)) return 0;
+  if (isNaN(schedDate.getTime()) || isNaN(actualDate.getTime())) return 0;
   
-  let diffMin = (aH * 60 + aM) - (sH * 60 + sM);
-  
-  if (diffMin < -180) { // Roll over midnight
-    diffMin += 24 * 60;
+  const diffMin = Math.round((actualDate - schedDate) / 60000);
+  return diffMin > 0 ? diffMin : 0;
+}
+
+// Helper to resolve an estimated/actual time into a full ISO datetime string
+function resolveEstimatedDatetime(scheduledDateStr, scheduledTime, estimatedTime) {
+  if (!scheduledDateStr || !scheduledTime || scheduledTime === '-' || !estimatedTime || estimatedTime === '-') {
+    return '-';
   }
   
-  return diffMin > 0 ? diffMin : 0;
+  if (estimatedTime.includes('T')) return estimatedTime;
+  
+  const [sYear, sMonth, sDay] = scheduledDateStr.split('-').map(Number);
+  const [sH, sM] = scheduledTime.split(':').map(Number);
+  
+  if (isNaN(sYear) || isNaN(sH)) return '-';
+  
+  const schedDate = new Date(sYear, sMonth - 1, sDay, sH, sM, 0);
+  
+  const [eH, eM] = estimatedTime.split(':').map(Number);
+  if (isNaN(eH)) return '-';
+  
+  const estDate = new Date(sYear, sMonth - 1, sDay, eH, eM, 0);
+  
+  const diffMin = (eH * 60 + eM) - (sH * 60 + sM);
+  
+  // If actual time is earlier than scheduled by more than 60 mins, it rolled over to next day
+  if (diffMin < -60) {
+    estDate.setDate(estDate.getDate() + 1);
+  }
+  // If actual time is almost 24 hours later but actually 10 mins early
+  else if (diffMin > 23 * 60) {
+    estDate.setDate(estDate.getDate() - 1);
+  }
+  
+  const year = estDate.getFullYear();
+  const month = String(estDate.getMonth() + 1).padStart(2, '0');
+  const day = String(estDate.getDate()).padStart(2, '0');
+  const hours = String(estDate.getHours()).padStart(2, '0');
+  const minutes = String(estDate.getMinutes()).padStart(2, '0');
+  
+  return `${year}-${month}-${day}T${hours}:${minutes}`;
 }
 
 // Parser for Sabiha Gökçen flight table
@@ -702,8 +737,40 @@ function checkAndTriggerWebhooks(newFlights) {
 async function persistFlights(newFlights) {
   if (!newFlights || newFlights.length === 0) return;
   
+  // Pre-process flights to convert times to full ISO datetimes
+  const processedFlights = newFlights.map(f => {
+    let scheduledDeparture = f.scheduledDeparture;
+    let scheduledArrival = f.scheduledArrival;
+    let actualDeparture = f.actualDeparture;
+    let actualArrival = f.actualArrival;
+    
+    if (scheduledDeparture !== '-' && !scheduledDeparture.includes('T')) {
+      scheduledDeparture = f.date + 'T' + scheduledDeparture;
+    }
+    if (scheduledArrival !== '-' && !scheduledArrival.includes('T')) {
+      scheduledArrival = f.date + 'T' + scheduledArrival;
+    }
+    
+    if (actualDeparture !== '-' && !actualDeparture.includes('T')) {
+      const schedTime = scheduledDeparture !== '-' ? scheduledDeparture.split('T')[1] : '00:00';
+      actualDeparture = resolveEstimatedDatetime(f.date, schedTime, actualDeparture);
+    }
+    if (actualArrival !== '-' && !actualArrival.includes('T')) {
+      const schedTime = scheduledArrival !== '-' ? scheduledArrival.split('T')[1] : '00:00';
+      actualArrival = resolveEstimatedDatetime(f.date, schedTime, actualArrival);
+    }
+    
+    return {
+      ...f,
+      scheduledDeparture,
+      scheduledArrival,
+      actualDeparture,
+      actualArrival
+    };
+  });
+  
   try {
-    await checkAndTriggerWebhooks(newFlights);
+    await checkAndTriggerWebhooks(processedFlights);
   } catch (e) {
     console.error("Webhook trigger check failed:", e.message);
   }
@@ -746,7 +813,7 @@ async function persistFlights(newFlights) {
           ELSE flights.status
         END
     `);
-    newFlights.forEach(f => {
+    processedFlights.forEach(f => {
       stmt.run([
         f.flightNumber, f.date, f.airline, f.departureAirport, f.arrivalAirport,
         f.departureCity, f.arrivalCity, f.scheduledDeparture, f.scheduledArrival,

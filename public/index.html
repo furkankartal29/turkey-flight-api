@@ -368,10 +368,18 @@
     // Helper to format scheduled time and display delay estimated time with badges
     function formatTimeWithDelay(scheduled, delayMin) {
       if (scheduled === '-') return '-';
-      if (!delayMin || delayMin <= 0) return scheduled;
       
-      const [h, m] = scheduled.split(':').map(Number);
-      if (isNaN(h)) return scheduled;
+      let timePart = scheduled;
+      if (scheduled.includes('T')) {
+        timePart = scheduled.split('T')[1];
+      }
+      
+      if (!delayMin || delayMin <= 0) {
+        return timePart;
+      }
+      
+      const [h, m] = timePart.split(':').map(Number);
+      if (isNaN(h)) return timePart;
       
       let estMin = h * 60 + m + delayMin;
       const estH = String(Math.floor(estMin / 60) % 24).padStart(2, '0');
@@ -386,13 +394,19 @@
         delayText = `+${delayMin}dk`;
       }
       
+      let rolloverText = '';
+      const daysDiff = Math.floor(estMin / (24 * 60));
+      if (daysDiff > 0) {
+        rolloverText = `<span style="font-size: 0.65rem; font-weight: 800; color: var(--accent-orange); margin-left: 0.15rem;">(+${daysDiff}g)</span>`;
+      }
+      
       return `
-        <div style="font-weight: 700; color: var(--accent-cyan); display: flex; align-items: center; gap: 0.25rem;">
-          ${estH}:${estM}
+        <div style="font-weight: 700; color: var(--accent-cyan); display: flex; align-items: center; gap: 0.25rem; flex-wrap: wrap;">
+          ${estH}:${estM}${rolloverText}
           <span class="delay-badge">${delayText}</span>
         </div>
         <div style="font-size: 0.72rem; color: var(--text-secondary); text-decoration: line-through; margin-top: 0.1rem;">
-          ${scheduled}
+          ${timePart}
         </div>
       `;
     }
@@ -690,14 +704,21 @@
 
       // Departure Details
       if (f.scheduledDeparture !== '-') {
+        let schedTime = f.scheduledDeparture;
+        if (f.scheduledDeparture.includes('T')) {
+          schedTime = f.scheduledDeparture.split('T')[1];
+        }
+        
         if (f.departureDelayMinutes > 0) {
-          const [h, m] = f.scheduledDeparture.split(':').map(Number);
+          const [h, m] = schedTime.split(':').map(Number);
           const estMin = h * 60 + m + f.departureDelayMinutes;
           const estH = String(Math.floor(estMin / 60) % 24).padStart(2, '0');
           const estM = String(estMin % 60).padStart(2, '0');
-          document.getElementById('det-kalkis-val').innerHTML = `${f.scheduledDeparture} <i class="fa-solid fa-arrow-right" style="font-size: 0.8rem; margin: 0 0.25rem;"></i> <span style="color: var(--accent-cyan); font-weight: 700;">${estH}:${estM}</span> <span class="delay-badge">+${f.departureDelayMinutes}dk</span>`;
+          const days = Math.floor(estMin / (24 * 60));
+          const dayBadge = days > 0 ? ` <span style="color: var(--accent-orange); font-weight: bold;">(+${days}g)</span>` : '';
+          document.getElementById('det-kalkis-val').innerHTML = `${schedTime} <i class="fa-solid fa-arrow-right" style="font-size: 0.8rem; margin: 0 0.25rem;"></i> <span style="color: var(--accent-cyan); font-weight: 700;">${estH}:${estM}</span>${dayBadge} <span class="delay-badge">+${f.departureDelayMinutes}dk</span>`;
         } else {
-          document.getElementById('det-kalkis-val').innerHTML = f.scheduledDeparture;
+          document.getElementById('det-kalkis-val').innerHTML = schedTime;
         }
       } else {
         document.getElementById('det-kalkis-val').innerText = '-';
@@ -705,14 +726,21 @@
 
       // Arrival Details
       if (f.scheduledArrival !== '-') {
+        let schedTime = f.scheduledArrival;
+        if (f.scheduledArrival.includes('T')) {
+          schedTime = f.scheduledArrival.split('T')[1];
+        }
+        
         if (f.arrivalDelayMinutes > 0) {
-          const [h, m] = f.scheduledArrival.split(':').map(Number);
+          const [h, m] = schedTime.split(':').map(Number);
           const estMin = h * 60 + m + f.arrivalDelayMinutes;
           const estH = String(Math.floor(estMin / 60) % 24).padStart(2, '0');
           const estM = String(estMin % 60).padStart(2, '0');
-          document.getElementById('det-varis-val').innerHTML = `${f.scheduledArrival} <i class="fa-solid fa-arrow-right" style="font-size: 0.8rem; margin: 0 0.25rem;"></i> <span style="color: var(--accent-cyan); font-weight: 700;">${estH}:${estM}</span> <span class="delay-badge">+${f.arrivalDelayMinutes}dk</span>`;
+          const days = Math.floor(estMin / (24 * 60));
+          const dayBadge = days > 0 ? ` <span style="color: var(--accent-orange); font-weight: bold;">(+${days}g)</span>` : '';
+          document.getElementById('det-varis-val').innerHTML = `${schedTime} <i class="fa-solid fa-arrow-right" style="font-size: 0.8rem; margin: 0 0.25rem;"></i> <span style="color: var(--accent-cyan); font-weight: 700;">${estH}:${estM}</span>${dayBadge} <span class="delay-badge">+${f.arrivalDelayMinutes}dk</span>`;
         } else {
-          document.getElementById('det-varis-val').innerHTML = f.scheduledArrival;
+          document.getElementById('det-varis-val').innerHTML = schedTime;
         }
       } else {
         document.getElementById('det-varis-val').innerText = '-';
