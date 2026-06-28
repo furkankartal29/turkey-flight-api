@@ -170,6 +170,7 @@
           <div style="display: flex; gap: 1rem; margin-bottom: 1rem; border-bottom: 1.5px solid var(--border-color); padding-bottom: 0.5rem;">
             <button id="sandbox-tab-search" onclick="switchSandboxTab('search')" style="background: none; border: none; font-family: var(--font-sans); font-size: 0.8rem; font-weight: 700; color: var(--accent-cyan); cursor: pointer; padding-bottom: 0.25rem; border-bottom: 2px solid var(--accent-cyan); outline: none;">Uçuş No ile Sorgula</button>
             <button id="sandbox-tab-route" onclick="switchSandboxTab('route')" style="background: none; border: none; font-family: var(--font-sans); font-size: 0.8rem; font-weight: 700; color: var(--text-secondary); cursor: pointer; padding-bottom: 0.25rem; outline: none;">Rota ile Sorgula</button>
+            <button id="sandbox-tab-webhook" onclick="switchSandboxTab('webhook')" style="background: none; border: none; font-family: var(--font-sans); font-size: 0.8rem; font-weight: 700; color: var(--text-secondary); cursor: pointer; padding-bottom: 0.25rem; outline: none;">Webhook Bildirimleri</button>
           </div>
 
           <!-- Tab Content: Flight Number -->
@@ -221,6 +222,42 @@
           <div style="display: flex; gap: 1rem; justify-content: flex-end; align-items: center; margin-top: 1rem;">
             <div id="sandbox-url-preview" style="font-family: var(--font-mono); font-size: 0.72rem; color: var(--accent-cyan); word-break: break-all; flex: 1; text-align: left;">Sorgu göndermek için parametreleri girip Gönder butonuna basın.</div>
             <button class="btn-test" onclick="runSandboxTest()" style="padding: 0.5rem 1.5rem; font-size: 0.85rem;"><i class="fa-solid fa-play"></i> Gönder</button>
+          </div>
+
+          <!-- Tab Content: Webhook -->
+          <div id="sandbox-content-webhook" style="display: none;">
+            <div style="margin-bottom: 1rem;">
+              <p style="font-size: 0.78rem; color: var(--text-secondary); margin-bottom: 0.75rem;">
+                Uçuşlarda rötar veya durum değişikliği algılandığında sistemin anında POST isteği atacağı Webhook URL'lerini yönetin.
+              </p>
+              
+              <div style="display: flex; gap: 0.5rem; margin-bottom: 1rem;">
+                <div style="flex: 1;">
+                  <input type="url" id="webhook-url-input" placeholder="Örn: http://localhost:3000/api/webhooks/test-receiver" style="padding: 0.5rem 0.75rem; font-size: 0.85rem; width: 100%; border: 1.5px solid var(--border-color); border-radius: 8px; font-family: var(--font-sans); outline: none; transition: var(--transition);">
+                </div>
+                <button class="btn-send" onclick="subscribeWebhook()" style="height: 38px; border-radius: 8px;"><i class="fa-solid fa-plus"></i> Kaydet</button>
+              </div>
+
+              <!-- Active webhooks list -->
+              <div id="active-webhooks-list" style="margin-bottom: 1.5rem; font-size: 0.8rem; background: var(--bg-secondary); border-radius: 8px; padding: 0.75rem; border: 1.5px solid var(--border-color); display: none;">
+                <div style="font-weight: bold; margin-bottom: 0.5rem; color: var(--text-primary);">Kayıtlı Webhook Adresleri:</div>
+                <div id="webhook-items-container" style="display: flex; flex-direction: column; gap: 0.35rem;"></div>
+              </div>
+
+              <!-- Test live logs -->
+              <div style="border-top: 1px solid var(--border-color); padding-top: 1rem;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+                  <span style="font-size: 0.85rem; font-weight: bold; color: var(--text-primary);"><i class="fa-solid fa-receipt"></i> Test Alıcısı Canlı Günlükleri (Built-in logs)</span>
+                  <button onclick="clearTestWebhookLogs()" style="background: none; border: none; color: var(--accent-red); font-size: 0.72rem; font-weight: bold; cursor: pointer; display: flex; align-items: center; gap: 0.2rem;"><i class="fa-solid fa-trash"></i> Temizle</button>
+                </div>
+                <p style="font-size: 0.72rem; color: var(--text-secondary); margin-bottom: 0.75rem;">
+                  Yukarıya <strong><code>http://localhost:3000/api/webhooks/test-receiver</code></strong> adresini kaydedip arka planda rötar oluştuğunda gelen canlı bildirimleri aşağıdaki pencerede görebilirsiniz.
+                </p>
+                <div id="webhook-logs-container" style="max-height: 180px; overflow-y: auto; background: #0f172a; color: #38bdf8; font-family: var(--font-mono); font-size: 0.72rem; padding: 0.75rem; border-radius: 8px; border: 1.5px solid var(--border-color);">
+                  <div style="color: #64748b;">Henüz gelen bildirim yok. Canlı kazıcı çalışıp rötar tespit ettiğinde veya durum güncellendiğinde burada görüntülenecektir...</div>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -837,23 +874,38 @@
       
       const tabSearch = document.getElementById('sandbox-tab-search');
       const tabRoute = document.getElementById('sandbox-tab-route');
+      const tabWebhook = document.getElementById('sandbox-tab-webhook');
       const contentSearch = document.getElementById('sandbox-content-search');
       const contentRoute = document.getElementById('sandbox-content-route');
+      const contentWebhook = document.getElementById('sandbox-content-webhook');
+
+      const activate = (btn, content) => {
+        btn.style.color = 'var(--accent-cyan)';
+        btn.style.borderBottom = '2px solid var(--accent-cyan)';
+        content.style.display = 'block';
+      };
+      const deactivate = (btn, content) => {
+        btn.style.color = 'var(--text-secondary)';
+        btn.style.borderBottom = 'none';
+        content.style.display = 'none';
+      };
 
       if (tab === 'search') {
-        tabSearch.style.color = 'var(--accent-cyan)';
-        tabSearch.style.borderBottom = '2px solid var(--accent-cyan)';
-        tabRoute.style.color = 'var(--text-secondary)';
-        tabRoute.style.borderBottom = 'none';
-        contentSearch.style.display = 'block';
-        contentRoute.style.display = 'none';
-      } else {
-        tabRoute.style.color = 'var(--accent-cyan)';
-        tabRoute.style.borderBottom = '2px solid var(--accent-cyan)';
-        tabSearch.style.color = 'var(--text-secondary)';
-        tabSearch.style.borderBottom = 'none';
-        contentSearch.style.display = 'none';
-        contentRoute.style.display = 'block';
+        activate(tabSearch, contentSearch);
+        deactivate(tabRoute, contentRoute);
+        deactivate(tabWebhook, contentWebhook);
+        if (logPollInterval) {
+          clearInterval(logPollInterval);
+          logPollInterval = null;
+        }
+      } else if (tab === 'route') {
+        activate(tabRoute, contentRoute);
+        deactivate(tabSearch, contentSearch);
+        deactivate(tabWebhook, contentWebhook);
+        if (logPollInterval) {
+          clearInterval(logPollInterval);
+          logPollInterval = null;
+        }
         
         // Populate sandbox dropdowns if empty
         const depSelect = document.getElementById('sandbox-dep');
@@ -874,6 +926,138 @@
             }
           });
         }
+      } else if (tab === 'webhook') {
+        activate(tabWebhook, contentWebhook);
+        deactivate(tabSearch, contentSearch);
+        deactivate(tabRoute, contentRoute);
+        
+        // Load active webhooks and start polling test receiver logs
+        loadWebhooks();
+        startPollingLogs();
+      }
+    }
+
+    // --- Webhooks Client Logic ---
+    let logPollInterval = null;
+
+    async function loadWebhooks() {
+      const container = document.getElementById('webhook-items-container');
+      const listEl = document.getElementById('active-webhooks-list');
+      try {
+        const res = await fetch('/api/webhooks');
+        const data = await res.json();
+        if (data.success && data.webhooks.length > 0) {
+          listEl.style.display = 'block';
+          container.innerHTML = data.webhooks.map(w => `
+            <div style="display: flex; justify-content: space-between; align-items: center; padding: 0.35rem; background: #fff; border-radius: 6px; border: 1px solid var(--border-color); margin-bottom: 0.25rem;">
+              <span style="font-family: var(--font-mono); font-size: 0.72rem; word-break: break-all; margin-right: 0.5rem; color: var(--text-primary);">${w.url}</span>
+              <button onclick="unsubscribeWebhook('${w.url}')" style="background: none; border: none; color: var(--accent-red); cursor: pointer; font-size: 0.75rem; padding: 0.1rem 0.3rem;"><i class="fa-solid fa-trash-can"></i></button>
+            </div>
+          `).join('');
+        } else {
+          listEl.style.display = 'none';
+          container.innerHTML = '';
+        }
+      } catch (e) {
+        console.error('Webhook yükleme hatası:', e);
+      }
+    }
+
+    async function subscribeWebhook() {
+      const input = document.getElementById('webhook-url-input');
+      const url = input.value.trim();
+      if (!url) {
+        alert('Lütfen geçerli bir URL girin.');
+        return;
+      }
+      try {
+        const res = await fetch('/api/webhooks/subscribe', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url })
+        });
+        const data = await res.json();
+        if (data.success) {
+          showToast('Webhook Başarıyla Eklendi!');
+          input.value = '';
+          loadWebhooks();
+        } else {
+          alert('Hata: ' + data.error);
+        }
+      } catch (e) {
+        alert('Sunucu hatası: ' + e.message);
+      }
+    }
+
+    async function unsubscribeWebhook(url) {
+      if (!confirm('Bu webhook aboneliğini iptal etmek istediğinize emin misiniz?')) return;
+      try {
+        const res = await fetch('/api/webhooks/unsubscribe', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url })
+        });
+        const data = await res.json();
+        if (data.success) {
+          showToast('Webhook Aboneliği Silindi!');
+          loadWebhooks();
+        }
+      } catch (e) {
+        alert('Hata: ' + e.message);
+      }
+    }
+
+    function startPollingLogs() {
+      if (logPollInterval) clearInterval(logPollInterval);
+      pollWebhookLogs();
+      logPollInterval = setInterval(pollWebhookLogs, 2500);
+    }
+
+    // Stop polling when page hidden
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden && logPollInterval) {
+        clearInterval(logPollInterval);
+        logPollInterval = null;
+      } else if (!document.hidden && activeSandboxTab === 'webhook') {
+        startPollingLogs();
+      }
+    });
+
+    async function pollWebhookLogs() {
+      const container = document.getElementById('webhook-logs-container');
+      try {
+        const res = await fetch('/api/webhooks/test-receiver');
+        const data = await res.json();
+        if (data.success && data.webhooks.length > 0) {
+          container.innerHTML = data.webhooks.map(log => `
+            <div style="border-bottom: 1px solid #1e293b; padding-bottom: 0.5rem; margin-bottom: 0.5rem;">
+              <div style="display: flex; justify-content: space-between; color: #a855f7; font-size: 0.65rem; margin-bottom: 0.2rem;">
+                <span>ID: ${log.id}</span>
+                <span>${new Date(log.timestamp).toLocaleTimeString()}</span>
+              </div>
+              <div style="color: #4ade80; font-weight: bold; margin-bottom: 0.2rem;">Event: ${log.body.event}</div>
+              <div style="color: #e2e8f0; font-size: 0.7rem; margin-bottom: 0.2rem;">Reason: ${log.body.reason}</div>
+              <pre style="margin: 0; color: #f472b6; font-size: 0.65rem; overflow-x: auto; white-space: pre-wrap; word-break: break-all;">Uçuş: ${log.body.flight.flightNumber} (${log.body.flight.departureAirport} ➔ ${log.body.flight.arrivalAirport}) - Durum: ${log.body.flight.status}</pre>
+            </div>
+          `).join('');
+        } else {
+          container.innerHTML = `<div style="color: #64748b;">Henüz gelen bildirim yok. Canlı kazıcı çalışıp rötar tespit ettiğinde veya durum güncellendiğinde burada görüntülenecektir...</div>`;
+        }
+      } catch (e) {
+        console.error('Logs polling error:', e);
+      }
+    }
+
+    async function clearTestWebhookLogs() {
+      try {
+        const res = await fetch('/api/webhooks/test-receiver', { method: 'DELETE' });
+        const data = await res.json();
+        if (data.success) {
+          showToast('Günlükler Temizlendi!');
+          pollWebhookLogs();
+        }
+      } catch (e) {
+        console.error(e);
       }
     }
 

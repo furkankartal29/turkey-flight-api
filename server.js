@@ -102,6 +102,13 @@ function initializeDatabase() {
           PRIMARY KEY (flightNumber, date, departureAirport, arrivalAirport)
         )
       `);
+      
+      db.run(`
+        CREATE TABLE IF NOT EXISTS webhooks (
+          url TEXT PRIMARY KEY,
+          createdAt TEXT
+        )
+      `);
 
       db.run("CREATE INDEX IF NOT EXISTS idx_flights_search ON flights (flightNumber, date)");
       db.run("CREATE INDEX IF NOT EXISTS idx_flights_route ON flights (departureAirport, arrivalAirport, date)");
@@ -592,9 +599,115 @@ const updateStatus = {
   dhmi:   { lastRun: null, lastCount: 0, running: false },
 };
 
+// Helper to check for delay updates and trigger Webhook endpoints
+function checkAndTriggerWebhooks(newFlights) {
+  return new Promise((resolve) => {
+    db.all("SELECT url FROM webhooks", [], (err, webhookRows) => {
+      if (err || !webhookRows || webhookRows.length === 0) {
+        return resolve();
+      }
+      const urls = webhookRows.map(r => r.url);
+      
+      let pending = newFlights.length;
+      if (pending === 0) return resolve();
+      
+      newFlights.forEach(f => {
+        db.get(
+          "SELECT actualDeparture, actualArrival, status FROM flights WHERE flightNumber = ? AND date = ? AND departureAirport = ? AND arrivalAirport = ?",
+          [f.flightNumber, f.date, f.departureAirport, f.arrivalAirport],
+          (err, row) => {
+            if (err) {
+              pending--;
+              if (pending === 0) resolve();
+              return;
+            }
+            
+            const newDepDelay = calculateDelayMinutes(f.scheduledDeparture, f.actualDeparture);
+            const newArrDelay = calculateDelayMinutes(f.scheduledArrival, f.actualArrival);
+            
+            let eventType = null;
+            let changeReason = "";
+            
+            if (!row) {
+              // Brand new flight with delay
+              if (newDepDelay > 0 || newArrDelay > 0 || (f.status && f.status.toUpperCase().includes('İPTAL'))) {
+                eventType = "flight.created_with_delay";
+                changeReason = "New flight registered with delay or cancellation";
+              }
+            } else {
+              // Existing flight delay/status change
+              const oldDepDelay = calculateDelayMinutes(f.scheduledDeparture, row.actualDeparture);
+              const oldArrDelay = calculateDelayMinutes(f.scheduledArrival, row.actualArrival);
+              
+              const depDelayChanged = newDepDelay !== oldDepDelay;
+              const arrDelayChanged = newArrDelay !== oldArrDelay;
+              const statusChanged = f.status !== row.status;
+              
+              if (depDelayChanged || arrDelayChanged) {
+                eventType = "flight.delay_updated";
+                changeReason = `Delay updated. Departure: ${oldDepDelay}m -> ${newDepDelay}m. Arrival: ${oldArrDelay}m -> ${newArrDelay}m.`;
+              } else if (statusChanged && (newDepDelay > 0 || newArrDelay > 0 || f.status.toUpperCase().includes('İPTAL') || f.status.toUpperCase().includes('İNDİ') || f.status.toUpperCase().includes('LANDED'))) {
+                eventType = "flight.status_updated";
+                changeReason = `Status changed: ${row.status} -> ${f.status}`;
+              }
+            }
+            
+            if (eventType) {
+              const payload = {
+                event: eventType,
+                reason: changeReason,
+                timestamp: new Date().toISOString(),
+                flight: {
+                  flightNumber: f.flightNumber,
+                  date: f.date,
+                  airline: f.airline,
+                  departureAirport: f.departureAirport,
+                  arrivalAirport: f.arrivalAirport,
+                  departureCity: f.departureCity,
+                  arrivalCity: f.arrivalCity,
+                  scheduledDeparture: f.scheduledDeparture,
+                  scheduledArrival: f.scheduledArrival,
+                  actualDeparture: f.actualDeparture,
+                  actualArrival: f.actualArrival,
+                  departureDelayMinutes: newDepDelay,
+                  arrivalDelayMinutes: newArrDelay,
+                  terminal: f.terminal,
+                  gate: f.gate,
+                  status: f.status
+                }
+              };
+              
+              urls.forEach(url => {
+                fetch(url, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify(payload),
+                  signal: AbortSignal.timeout(4000)
+                }).catch(e => {
+                  console.error(`Webhook send failed for ${url}:`, e.message);
+                });
+              });
+            }
+            
+            pending--;
+            if (pending === 0) resolve();
+          }
+        );
+      });
+    });
+  });
+}
+
 // Shared helper: writes new flights to SQLite via transaction with conflict resolution (upsert)
-function persistFlights(newFlights) {
+async function persistFlights(newFlights) {
   if (!newFlights || newFlights.length === 0) return;
+  
+  try {
+    await checkAndTriggerWebhooks(newFlights);
+  } catch (e) {
+    console.error("Webhook trigger check failed:", e.message);
+  }
+
   db.serialize(() => {
     db.run("BEGIN TRANSACTION");
     const stmt = db.prepare(`
@@ -1059,6 +1172,70 @@ app.get('/api/airports/:iata/:type', (req, res) => {
       flights: rows
     });
   });
+});
+
+// --- WEBHOOK ENDPOINTS ---
+const receivedWebhooks = [];
+
+// Subscribe a new Webhook URL
+app.post('/api/webhooks/subscribe', (req, res) => {
+  const { url } = req.body;
+  if (!url) return res.status(400).json({ success: false, error: "URL is required" });
+  
+  db.run(
+    "INSERT OR REPLACE INTO webhooks (url, createdAt) VALUES (?, ?)",
+    [url, new Date().toISOString()],
+    (err) => {
+      if (err) return res.status(500).json({ success: false, error: err.message });
+      res.json({ success: true, message: `Successfully subscribed ${url}` });
+    }
+  );
+});
+
+// Unsubscribe a Webhook URL
+app.post('/api/webhooks/unsubscribe', (req, res) => {
+  const { url } = req.body;
+  if (!url) return res.status(400).json({ success: false, error: "URL is required" });
+  
+  db.run(
+    "DELETE FROM webhooks WHERE url = ?",
+    [url],
+    (err) => {
+      if (err) return res.status(500).json({ success: false, error: err.message });
+      res.json({ success: true, message: `Successfully unsubscribed ${url}` });
+    }
+  );
+});
+
+// Get all active Webhook URL subscriptions
+app.get('/api/webhooks', (req, res) => {
+  db.all("SELECT * FROM webhooks ORDER BY createdAt DESC", [], (err, rows) => {
+    if (err) return res.status(500).json({ success: false, error: err.message });
+    res.json({ success: true, count: rows.length, webhooks: rows });
+  });
+});
+
+// Built-in Webhook Test Receiver Endpoint
+app.post('/api/webhooks/test-receiver', (req, res) => {
+  receivedWebhooks.unshift({
+    id: Date.now() + Math.random().toString(36).substr(2, 5),
+    timestamp: new Date().toISOString(),
+    headers: req.headers,
+    body: req.body
+  });
+  if (receivedWebhooks.length > 50) receivedWebhooks.pop();
+  res.json({ success: true, message: "Webhook received by built-in test receiver" });
+});
+
+// Get received webhooks logs
+app.get('/api/webhooks/test-receiver', (req, res) => {
+  res.json({ success: true, count: receivedWebhooks.length, webhooks: receivedWebhooks });
+});
+
+// Clear received webhooks logs
+app.delete('/api/webhooks/test-receiver', (req, res) => {
+  receivedWebhooks.length = 0;
+  res.json({ success: true, message: "Cleared received webhook logs" });
 });
 
 app.listen(PORT, () => {
