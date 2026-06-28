@@ -46,18 +46,22 @@ try {
 const internationalCities = {
   "LHR": "Londra", "LGW": "Londra", "STN": "Londra", "SEN": "Londra",
   "CDG": "Paris", "ORY": "Paris",
-  "FRA": "Frankfurt", "MUC": "Münih", "DUS": "Düsseldorf", "HAM": "Hamburg", "TXL": "Berlin", "BER": "Berlin",
-  "AMS": "Amsterdam", "BRU": "Brüksel", "ZRH": "Zürih", "GVA": "Cenevre",
+  "FRA": "Frankfurt", "MUC": "Münih", "DUS": "Düsseldorf", "HAM": "Hamburg", "TXL": "Berlin", "BER": "Berlin", "SXF": "Berlin",
+  "AMS": "Amsterdam", "BRU": "Brüksel", "CRL": "Brüksel", "ZRH": "Zürih", "GVA": "Cenevre",
   "VIE": "Viyana", "FCO": "Roma", "MXP": "Milano", "MAD": "Madrid", "BCN": "Barselona",
-  "ATH": "Atina", "ECN": "Lefkoşa", "BUD": "Budapeşte", "OTP": "Bükreş", "WAW": "Varşova",
+  "ATH": "Atina", "SKG": "Selanik", "ECN": "Lefkoşa", "BUD": "Budapeşte", "OTP": "Bükreş", "WAW": "Varşova",
+  "RZE": "Rzeszow", "HEL": "Helsinki", "CPH": "Kopenhag", "ARN": "Stokholm", "OSL": "Oslo",
   "LED": "St. Petersburg", "SVO": "Moskova", "DME": "Moskova", "VKO": "Moskova",
-  "DXB": "Dubai", "SHJ": "Şarika", "DOH": "Doha", "MCT": "Maskat", "RUH": "Riyad", "JED": "Cidde",
+  "DXB": "Dubai", "SHJ": "Şarika", "DOH": "Doha", "MCT": "Maskat", "RUH": "Riyad", "JED": "Cidde", "MED": "Medine",
   "TLV": "Tel Aviv", "AMM": "Amman", "BEY": "Beyrut", "GYD": "Bakü", "EVN": "Erivan",
   "TBS": "Tiflis", "TAS": "Taşkent", "ASB": "Aşkabat", "ALA": "Almatı", "NQZ": "Astana",
   "DEL": "Yeni Delhi", "BOM": "Mumbai", "PEK": "Pekin", "PVG": "Şanghay", "HND": "Tokyo",
   "NRT": "Tokyo", "SIN": "Singapur", "BKK": "Bangkok", "JFK": "New York", "EWR": "New York",
   "ORD": "Chicago", "LAX": "Los Angeles", "MCO": "Orlando", "MIA": "Miami", "YYZ": "Toronto",
-  "LCA": "Larnaka"
+  "LCA": "Larnaka", "PRG": "Prag", "STR": "Stuttgart", "CGN": "Köln", "HAJ": "Hannover",
+  "NUE": "Nürnberg", "BSL": "Basel", "KBP": "Kiev", "ODS": "Odessa", "IEV": "Kiev",
+  "MSQ": "Minsk", "CAI": "Kahire", "HRG": "Hurgada", "SSH": "Şarm El-Şeyh", "CMN": "Kazablanka",
+  "ALG": "Cezayir", "TUN": "Tunus", "ICN": "Seul", "DYU": "Duşanbe", "FRU": "Bişkek"
 };
 
 // Initialize SQLite connection and database
@@ -109,6 +113,7 @@ function getAirlineName(flightNumber) {
 function getAirportCity(iata) {
   if (!iata) return "";
   const code = iata.toUpperCase().trim();
+  if (code === 'INT') return ""; // Fallback to raw scraped city name
   if (airportsDb[code]) {
     return airportsDb[code].city;
   }
@@ -118,6 +123,7 @@ function getAirportCity(iata) {
 function getAirportName(iata) {
   if (!iata) return "";
   const code = iata.toUpperCase().trim();
+  if (code === 'INT') return "Uluslararası Havalimanı";
   if (airportsDb[code]) {
     return airportsDb[code].name;
   }
