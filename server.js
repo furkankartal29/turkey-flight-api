@@ -1077,6 +1077,10 @@ app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
+app.get('/developer', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'developer.html'));
+});
+
 // Get list of all airports in Turkey
 app.get('/api/airports', (req, res) => {
   res.json({

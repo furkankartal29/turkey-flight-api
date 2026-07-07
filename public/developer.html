@@ -1,0 +1,564 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Türkiye Uçuş API Geliştirici Portalı</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <style>
+    /* Custom developer portal specific adjustments */
+    .docs-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 1rem 0;
+      font-size: 0.82rem;
+    }
+    .docs-table th, .docs-table td {
+      padding: 0.6rem 0.8rem;
+      text-align: left;
+      border-bottom: 1.5px solid var(--border-color);
+    }
+    .docs-table th {
+      background: var(--bg-secondary);
+      font-weight: 700;
+      color: var(--accent-cyan);
+    }
+    .type-badge {
+      font-family: var(--font-mono);
+      font-size: 0.72rem;
+      padding: 0.15rem 0.4rem;
+      border-radius: 4px;
+      background: rgba(56, 189, 248, 0.15);
+      color: var(--accent-cyan);
+    }
+  </style>
+</head>
+<body>
+
+  <div class="container">
+    
+    <!-- Header -->
+    <header>
+      <div class="logo-section">
+        <div class="logo-icon">
+          <i class="fa-solid fa-code"></i>
+        </div>
+        <div>
+          <h1>Uçuş API Geliştirici Portalı</h1>
+          <p style="margin: 0; color: var(--text-secondary);">REST API Uç Noktaları, Şema Dokümantasyonu ve Canlı Webhook Test Paneli</p>
+        </div>
+      </div>
+      <div>
+        <a href="/" class="btn-search" style="text-decoration: none; padding: 0.5rem 1rem; font-size: 0.85rem; border-radius: 8px; display: inline-flex; align-items: center; gap: 0.5rem; background: var(--bg-secondary); border: 1.5px solid var(--border-color); color: var(--text-primary);"><i class="fa-solid fa-arrow-left"></i> Arama Motoruna Dön</a>
+      </div>
+    </header>
+
+    <!-- Schema Documentation Card -->
+    <div class="card" style="margin-bottom: 2rem;">
+      <h3 class="card-title"><i class="fa-solid fa-book"></i> Veri Şeması ve API Özellikleri</h3>
+      <p style="font-size: 0.88rem; line-height: 1.5;">
+        Arama motorumuzun sunduğu API uç noktaları, Türkiye genelindeki tarifeli uçuşları standartlaştırılmış veri formatıyla sunar. Entegrasyonlarınızı kolaylaştırmak adına durum kodları ve evrensel zaman formatları (UTC) kullanılmaktadır.
+      </p>
+
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; margin-top: 1.5rem;">
+        
+        <!-- Status Codes -->
+        <div>
+          <h4 style="color: var(--accent-cyan); font-weight: bold; font-size: 0.9rem; margin-bottom: 0.5rem;"><i class="fa-solid fa-signal"></i> Uçuş Durum Kodları (statusCode / statusText)</h4>
+          <p style="font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 0.5rem;">
+            Metinsel Türkçe durumlar yerine, API entegrasyonlarınızda aşağıdaki standart kodları kullanabilirsiniz:
+          </p>
+          <table class="docs-table">
+            <thead>
+              <tr>
+                <th style="width: 20%;">Kod</th>
+                <th style="width: 40%;">Metin</th>
+                <th style="width: 40%;">Açıklama</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><strong>1</strong></td>
+                <td><span class="type-badge">SCHEDULED</span></td>
+                <td>Uçuş tarifeli zamanında planlandı</td>
+              </tr>
+              <tr>
+                <td><strong>2</strong></td>
+                <td><span class="type-badge" style="background: rgba(249, 115, 22, 0.15); color: var(--accent-orange);">DELAYED</span></td>
+                <td>Uçuşta gecikme (rötar) mevcut</td>
+              </tr>
+              <tr>
+                <td><strong>3</strong></td>
+                <td><span class="type-badge" style="background: rgba(168, 85, 247, 0.15); color: #c084fc;">BOARDING</span></td>
+                <td>Uçağa biniş başladı, kapıya gidin veya son çağrı</td>
+              </tr>
+              <tr>
+                <td><strong>4</strong></td>
+                <td><span class="type-badge" style="background: rgba(34, 197, 94, 0.15); color: var(--accent-green);">LANDED</span></td>
+                <td>Uçak varış havalimanına indi</td>
+              </tr>
+              <tr>
+                <td><strong>5</strong></td>
+                <td><span class="type-badge" style="background: rgba(239, 68, 68, 0.15); color: var(--accent-red);">CANCELLED</span></td>
+                <td>Sefer iptal edildi</td>
+              </tr>
+              <tr>
+                <td><strong>0</strong></td>
+                <td><span class="type-badge" style="background: rgba(100, 116, 139, 0.15); color: var(--text-secondary);">UNKNOWN</span></td>
+                <td>Bilinmeyen durum veya pano verisi eksik</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Timezones & Estimates -->
+        <div>
+          <h4 style="color: var(--accent-cyan); font-weight: bold; font-size: 0.9rem; margin-bottom: 0.5rem;"><i class="fa-solid fa-clock"></i> Evrensel Zaman (UTC) ve Tahmin Modeli</h4>
+          
+          <div style="background: var(--bg-secondary); border-radius: 8px; padding: 0.85rem; border: 1.5px solid var(--border-color); margin-bottom: 1rem; font-size: 0.8rem; line-height: 1.4;">
+            <strong>🌍 Zaman Dilimi Dönüşümü:</strong><br>
+            Türkiye yerel saati sabit olarak <strong>UTC+3 (TRT)</strong>'dir. API'den dönen <code>*Utc</code> son ekli alanlar, bu yerel saatlerden 3 saat geri alınarak standart ISO 8601 UTC formatına (örn: <code>2026-07-08T05:00:00.000Z</code>) dönüştürülmüştür.
+          </div>
+
+          <div style="background: var(--bg-secondary); border-radius: 8px; padding: 0.85rem; border: 1.5px solid var(--border-color); font-size: 0.8rem; line-height: 1.4;">
+            <strong>⚙️ Tarihçeli Kendi Kendini İyileştirme (Self-Healing):</strong><br>
+            Kalkış veya varış panosundan çekilemeyen eksik veriler, veritabanındaki geçmiş uçuş süreleri veya rota tarihçesi analiz edilerek otomatik tamamlanır. Tamamlanan bu kayıtlar API çıktısında <code>isEstimatedArrival: true</code> veya <code>isEstimatedDeparture: true</code> flag'leri ile işaretlenir ve sistem tahmini olduğunu belirtir.
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- API Reference & Sandbox Grid -->
+    <div class="grid-2">
+      
+      <!-- API Endpoints Card -->
+      <div class="card">
+        <h3 class="card-title"><i class="fa-solid fa-code"></i> REST API Uç Noktaları</h3>
+        <p>Arama motorumuzun kullandığı uç noktaları sorgulayarak doğrudan rota tabanlı (kalkış ve varış parametreli) JSON listelerini çekebilirsiniz.</p>
+        
+        <div class="endpoint-list" style="margin-top: 1.5rem;">
+          
+          <div class="endpoint-item">
+            <div class="endpoint-header">
+              <span class="method get">GET</span>
+              <span class="path" id="path-flights-route">/api/flights?departure=SAW&arrival=ADB</span>
+              <span class="desc">Kalkış-Varış Rota API'si</span>
+              <button class="copy-btn" onclick="copyPath('path-flights-route')" title="Kopyala"><i class="fa-regular fa-copy"></i></button>
+              <button class="btn-test" onclick="testEndpoint('/api/flights?departure=SAW&arrival=ADB')">Test Et</button>
+            </div>
+          </div>
+
+          <div class="endpoint-item">
+            <div class="endpoint-header">
+              <span class="method get">GET</span>
+              <span class="path" id="path-search">/api/flights/search</span>
+              <span class="desc">Uçuş Kodu & Tarih API'si</span>
+              <button class="copy-btn" onclick="copyPath('path-search')" title="Kopyala"><i class="fa-regular fa-copy"></i></button>
+              <button class="btn-test" id="btn-test-search" onclick="testEndpoint('/api/flights/search?flightNumber=PC2325')">Test Et</button>
+            </div>
+          </div>
+
+          <div class="endpoint-item">
+            <div class="endpoint-header">
+              <span class="method get">GET</span>
+              <span class="path" id="path-airports">/api/airports</span>
+              <span class="desc">Havalimanları Sözlüğü</span>
+              <button class="copy-btn" onclick="copyPath('path-airports')" title="Kopyala"><i class="fa-regular fa-copy"></i></button>
+              <button class="btn-test" onclick="testEndpoint('/api/airports')">Test Et</button>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- Interactive API Sandbox -->
+        <div style="margin-top: 2rem; padding-top: 1.5rem; border-top: 1.5px solid var(--border-color);">
+          <h4 style="font-size: 1rem; font-weight: 800; margin-bottom: 1rem; color: var(--text-primary);"><i class="fa-solid fa-flask"></i> İnteraktif API Sandbox</h4>
+          
+          <!-- Sandbox Tabs -->
+          <div style="display: flex; gap: 1rem; margin-bottom: 1rem; border-bottom: 1.5px solid var(--border-color); padding-bottom: 0.5rem;">
+            <button id="sandbox-tab-search" onclick="switchSandboxTab('search')" style="background: none; border: none; font-family: var(--font-sans); font-size: 0.8rem; font-weight: 700; color: var(--accent-cyan); cursor: pointer; padding-bottom: 0.25rem; border-bottom: 2px solid var(--accent-cyan); outline: none;">Uçuş No ile Sorgula</button>
+            <button id="sandbox-tab-route" onclick="switchSandboxTab('route')" style="background: none; border: none; font-family: var(--font-sans); font-size: 0.8rem; font-weight: 700; color: var(--text-secondary); cursor: pointer; padding-bottom: 0.25rem; outline: none;">Rota ile Sorgula</button>
+            <button id="sandbox-tab-webhook" onclick="switchSandboxTab('webhook')" style="background: none; border: none; font-family: var(--font-sans); font-size: 0.8rem; font-weight: 700; color: var(--text-secondary); cursor: pointer; padding-bottom: 0.25rem; outline: none;">Webhook Bildirimleri</button>
+          </div>
+
+          <!-- Tab Content: Flight Number -->
+          <div id="sandbox-content-search">
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
+              <div class="input-group">
+                <label style="font-size: 0.65rem;" for="sandbox-flight">Uçuş Kodu</label>
+                <input type="text" id="sandbox-flight" placeholder="Örn: PC2325" style="padding: 0.5rem 0.75rem; font-size: 0.85rem;">
+              </div>
+              <div class="input-group">
+                <label style="font-size: 0.65rem;" for="sandbox-date-search">Uçuş Tarihi</label>
+                <input type="date" id="sandbox-date-search" style="padding: 0.5rem 0.75rem; font-size: 0.85rem;">
+              </div>
+            </div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
+              <div class="input-group">
+                <label style="font-size: 0.65rem;" for="sandbox-departure-search">Kalkış Havalimanı IATA (Opsiyonel)</label>
+                <input type="text" id="sandbox-departure-search" placeholder="Örn: DNZ" style="padding: 0.5rem 0.75rem; font-size: 0.85rem; text-transform: uppercase;">
+              </div>
+              <div class="input-group">
+                <label style="font-size: 0.65rem;" for="sandbox-arrival-search">Varış Havalimanı IATA (Opsiyonel)</label>
+                <input type="text" id="sandbox-arrival-search" placeholder="Örn: SAW" style="padding: 0.5rem 0.75rem; font-size: 0.85rem; text-transform: uppercase;">
+              </div>
+            </div>
+          </div>
+
+          <!-- Tab Content: Route -->
+          <div id="sandbox-content-route" style="display: none;">
+            <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0.75rem; margin-bottom: 1rem;">
+              <div class="input-group">
+                <label style="font-size: 0.65rem;" for="sandbox-dep">Kalkış Havalimanı</label>
+                <select id="sandbox-dep" style="padding: 0.5rem 0.5rem; font-size: 0.85rem; height: 38px;">
+                  <option value="">Tümü (Seçiniz)</option>
+                </select>
+              </div>
+              <div class="input-group">
+                <label style="font-size: 0.65rem;" for="sandbox-arr">Varış Havalimanı</label>
+                <select id="sandbox-arr" style="padding: 0.5rem 0.5rem; font-size: 0.85rem; height: 38px;">
+                  <option value="">Tümü (Seçiniz)</option>
+                </select>
+              </div>
+              <div class="input-group">
+                <label style="font-size: 0.65rem;" for="sandbox-date-route">Tarih</label>
+                <input type="date" id="sandbox-date-route" style="padding: 0.5rem 0.75rem; font-size: 0.85rem; height: 38px;">
+              </div>
+            </div>
+          </div>
+
+          <div style="display: flex; gap: 1rem; justify-content: flex-end; align-items: center; margin-top: 1rem;">
+            <div id="sandbox-url-preview" style="font-family: var(--font-mono); font-size: 0.72rem; color: var(--accent-cyan); word-break: break-all; flex: 1; text-align: left;">Sorgu göndermek için parametreleri girip Gönder butonuna basın.</div>
+            <button class="btn-test" onclick="runSandboxTest()" style="padding: 0.5rem 1.5rem; font-size: 0.85rem;"><i class="fa-solid fa-play"></i> Gönder</button>
+          </div>
+
+          <!-- Tab Content: Webhook -->
+          <div id="sandbox-content-webhook" style="display: none;">
+            <div style="margin-bottom: 1rem;">
+              <p style="font-size: 0.78rem; color: var(--text-secondary); margin-bottom: 0.75rem;">
+                Uçuşlarda rötar veya durum değişikliği algılandığında sistemin anında POST isteği atacağı Webhook URL'lerini yönetin.
+              </p>
+              
+              <div style="display: flex; gap: 0.5rem; margin-bottom: 1rem;">
+                <div style="flex: 1;">
+                  <input type="url" id="webhook-url-input" placeholder="Örn: http://localhost:3000/api/webhooks/test-receiver" style="padding: 0.5rem 0.75rem; font-size: 0.85rem; width: 100%; border: 1.5px solid var(--border-color); border-radius: 8px; font-family: var(--font-sans); outline: none; transition: var(--transition);">
+                </div>
+                <button class="btn-send" onclick="subscribeWebhook()" style="height: 38px; border-radius: 8px;"><i class="fa-solid fa-plus"></i> Kaydet</button>
+              </div>
+
+              <!-- Active webhooks list -->
+              <div id="active-webhooks-list" style="margin-bottom: 1.5rem; font-size: 0.8rem; background: var(--bg-secondary); border-radius: 8px; padding: 0.75rem; border: 1.5px solid var(--border-color); display: none;">
+                <div style="font-weight: bold; margin-bottom: 0.5rem; color: var(--text-primary);">Kayıtlı Webhook Adresleri:</div>
+                <div id="webhook-items-container" style="display: flex; flex-direction: column; gap: 0.35rem;"></div>
+              </div>
+
+              <!-- Test live logs -->
+              <div style="border-top: 1px solid var(--border-color); padding-top: 1rem;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+                  <span style="font-size: 0.85rem; font-weight: bold; color: var(--text-primary);"><i class="fa-solid fa-receipt"></i> Test Alıcısı Canlı Günlükleri (Built-in logs)</span>
+                  <button onclick="clearTestWebhookLogs()" style="background: none; border: none; color: var(--accent-red); font-size: 0.72rem; font-weight: bold; cursor: pointer; display: flex; align-items: center; gap: 0.2rem;"><i class="fa-solid fa-trash"></i> Temizle</button>
+                </div>
+                <p style="font-size: 0.72rem; color: var(--text-secondary); margin-bottom: 0.75rem;">
+                  Yukarıya <strong><code>http://localhost:3000/api/webhooks/test-receiver</code></strong> adresini kaydedip arka planda rötar oluştuğunda gelen canlı bildirimleri aşağıdaki pencerede görebilirsiniz.
+                </p>
+                <div id="webhook-logs-container" style="max-height: 180px; overflow-y: auto; background: #0f172a; color: #38bdf8; font-family: var(--font-mono); font-size: 0.72rem; padding: 0.75rem; border-radius: 8px; border: 1.5px solid var(--border-color);">
+                  <div style="color: #64748b;">Henüz gelen bildirim yok. Canlı kazıcı çalışıp rötar tespit ettiğinde veya durum güncellendiğinde burada görüntülenecektir...</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Live Test Console Card -->
+      <div class="card" style="display: flex; flex-direction: column;">
+        <div class="console-header">
+          <h3 class="card-title" style="margin: 0;"><i class="fa-solid fa-terminal"></i> Canlı Yanıt Konsolu</h3>
+          <span class="console-status" id="console-status">Bekleniyor...</span>
+        </div>
+        <div class="code-container" style="flex: 1;">
+          <pre><code id="json-output">// API uç noktalarından birinin yanındaki "Test Et" butonuna basarak canlı JSON çıktısını görebilirsiniz.</code></pre>
+        </div>
+      </div>
+
+    </div>
+
+  </div>
+
+  <script>
+    let activeSandboxTab = 'search';
+    let airportsList = [];
+
+    // Helper to format date as YYYY-MM-DD in local time
+    function getLocalDateString() {
+      const d = new Date();
+      const year = d.getFullYear();
+      const month = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+      const todayStr = getLocalDateString();
+      document.getElementById('sandbox-date-search').value = todayStr;
+      document.getElementById('sandbox-date-route').value = todayStr;
+
+      // Listeners for sandbox inputs to update URL preview
+      ['sandbox-flight', 'sandbox-date-search', 'sandbox-departure-search', 'sandbox-arrival-search'].forEach(id => {
+        document.getElementById(id).addEventListener('input', updateSandboxUrlPreview);
+      });
+      ['sandbox-dep', 'sandbox-arr', 'sandbox-date-route'].forEach(id => {
+        document.getElementById(id).addEventListener('change', updateSandboxUrlPreview);
+      });
+
+      loadAirports();
+      updateSandboxUrlPreview();
+      fetchWebhooks();
+      pollWebhookLogs();
+
+      // Poll built-in receiver logs every 3 seconds
+      setInterval(pollWebhookLogs, 3000);
+    });
+
+    // Populate Airports
+    async function loadAirports() {
+      try {
+        const res = await fetch('/api/airports');
+        if (res.ok) {
+          const data = await res.json();
+          airportsList = Object.keys(data).map(key => ({
+            iata: key,
+            name: data[key].name,
+            city: data[key].city
+          })).sort((a, b) => a.city.localeCompare(b.city, 'tr'));
+
+          const depSel = document.getElementById('sandbox-dep');
+          const arrSel = document.getElementById('sandbox-arr');
+
+          airportsList.forEach(ap => {
+            const opt = `<option value="${ap.iata}">${ap.city} (${ap.name})</option>`;
+            depSel.innerHTML += opt;
+            arrSel.innerHTML += opt;
+          });
+        }
+      } catch (e) {
+        console.error("Havalimanları yüklenemedi:", e);
+      }
+    }
+
+    function switchSandboxTab(tab) {
+      activeSandboxTab = tab;
+      
+      // Update UI tabs styling
+      ['search', 'route', 'webhook'].forEach(t => {
+        const el = document.getElementById(`sandbox-tab-${t}`);
+        if (t === tab) {
+          el.style.color = 'var(--accent-cyan)';
+          el.style.borderBottom = '2px solid var(--accent-cyan)';
+        } else {
+          el.style.color = 'var(--text-secondary)';
+          el.style.borderBottom = 'none';
+        }
+      });
+
+      // Show/hide content panels
+      document.getElementById('sandbox-content-search').style.display = tab === 'search' ? 'block' : 'none';
+      document.getElementById('sandbox-content-route').style.display = tab === 'route' ? 'block' : 'none';
+      document.getElementById('sandbox-content-webhook').style.display = tab === 'webhook' ? 'block' : 'none';
+
+      updateSandboxUrlPreview();
+    }
+
+    function updateSandboxUrlPreview() {
+      const origin = window.location.origin;
+      let url = '';
+
+      if (activeSandboxTab === 'search') {
+        const fl = document.getElementById('sandbox-flight').value.replace(/\s+/g, '').toUpperCase().trim();
+        const dt = document.getElementById('sandbox-date-search').value;
+        const dep = document.getElementById('sandbox-departure-search').value.replace(/\s+/g, '').toUpperCase().trim();
+        const arr = document.getElementById('sandbox-arrival-search').value.replace(/\s+/g, '').toUpperCase().trim();
+
+        url = `/api/flights/search?flightNumber=${fl || 'PC2325'}&date=${dt}`;
+        if (dep) url += `&departure=${dep}`;
+        if (arr) url += `&arrival=${arr}`;
+      } else if (activeSandboxTab === 'route') {
+        const dep = document.getElementById('sandbox-dep').value;
+        const arr = document.getElementById('sandbox-arr').value;
+        const dt = document.getElementById('sandbox-date-route').value;
+
+        url = `/api/flights?date=${dt}`;
+        if (dep) url += `&departure=${dep}`;
+        if (arr) url += `&arrival=${arr}`;
+      } else {
+        url = `/api/webhooks/subscribe`;
+      }
+
+      document.getElementById('sandbox-url-preview').innerText = `${origin}${url}`;
+    }
+
+    async function runSandboxTest() {
+      if (activeSandboxTab === 'webhook') {
+        subscribeWebhook();
+        return;
+      }
+
+      const previewText = document.getElementById('sandbox-url-preview').innerText;
+      document.getElementById('console-status').innerText = 'Sorgulanıyor...';
+      document.getElementById('console-status').style.color = 'var(--accent-orange)';
+
+      try {
+        const res = await fetch(previewText);
+        const data = await res.json();
+        
+        document.getElementById('console-status').innerText = '200 OK';
+        document.getElementById('console-status').style.color = 'var(--accent-green)';
+        document.getElementById('json-output').innerText = JSON.stringify(data, null, 2);
+      } catch (e) {
+        document.getElementById('console-status').innerText = 'Hata';
+        document.getElementById('console-status').style.color = 'var(--accent-red)';
+        document.getElementById('json-output').innerText = JSON.stringify({ error: e.message }, null, 2);
+      }
+    }
+
+    async function testEndpoint(path) {
+      document.getElementById('console-status').innerText = 'Sorgulanıyor...';
+      document.getElementById('console-status').style.color = 'var(--accent-orange)';
+
+      try {
+        const res = await fetch(path);
+        const data = await res.json();
+        
+        document.getElementById('console-status').innerText = '200 OK';
+        document.getElementById('console-status').style.color = 'var(--accent-green)';
+        document.getElementById('json-output').innerText = JSON.stringify(data, null, 2);
+      } catch (e) {
+        document.getElementById('console-status').innerText = 'Hata';
+        document.getElementById('console-status').style.color = 'var(--accent-red)';
+        document.getElementById('json-output').innerText = JSON.stringify({ error: e.message }, null, 2);
+      }
+    }
+
+    function copyPath(id) {
+      const text = document.getElementById(id).innerText;
+      const fullUrl = `${window.location.origin}${text}`;
+      navigator.clipboard.writeText(fullUrl).then(() => {
+        alert("API adresi kopyalandı:\n" + fullUrl);
+      });
+    }
+
+    // Webhooks Operations
+    async function fetchWebhooks() {
+      try {
+        const res = await fetch('/api/webhooks');
+        if (res.ok) {
+          const list = await res.json();
+          const container = document.getElementById('webhook-items-container');
+          const wrapper = document.getElementById('active-webhooks-list');
+          
+          if (list.length === 0) {
+            wrapper.style.display = 'none';
+            return;
+          }
+
+          wrapper.style.display = 'block';
+          container.innerHTML = list.map(item => `
+            <div style="display: flex; justify-content: space-between; align-items: center; background: rgba(255,255,255,0.03); padding: 0.35rem 0.5rem; border-radius: 6px; border: 1px solid var(--border-color);">
+              <span style="font-family: var(--font-mono); color: var(--accent-cyan); font-size: 0.75rem; word-break: break-all; padding-right: 0.5rem;">${item.url}</span>
+              <button onclick="unsubscribeWebhook('${item.url}')" style="background: none; border: none; color: var(--accent-red); cursor: pointer; font-size: 0.8rem;" title="Aboneliği Sil"><i class="fa-solid fa-trash-can"></i></button>
+            </div>
+          `).join('');
+        }
+      } catch (e) {
+        console.error("Webhook listesi alınamadı:", e);
+      }
+    }
+
+    async function subscribeWebhook() {
+      const urlInput = document.getElementById('webhook-url-input');
+      const url = urlInput.value.trim();
+      if (!url) return alert('Lütfen geçerli bir Webhook URL girin.');
+
+      try {
+        const res = await fetch('/api/webhooks/subscribe', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url })
+        });
+        const data = await res.json();
+        if (data.success) {
+          urlInput.value = '';
+          fetchWebhooks();
+          alert('Webhook başarıyla kaydedildi!');
+        } else {
+          alert('Hata: ' + data.message);
+        }
+      } catch (e) {
+        alert('Abone olunurken bağlantı hatası oluştu.');
+      }
+    }
+
+    async function unsubscribeWebhook(url) {
+      if (!confirm('Bu webhook aboneliğini iptal etmek istediğinize emin misiniz?')) return;
+      try {
+        const res = await fetch('/api/webhooks/unsubscribe', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url })
+        });
+        const data = await res.json();
+        if (data.success) {
+          fetchWebhooks();
+        } else {
+          alert('Hata: ' + data.message);
+        }
+      } catch (e) {
+        alert('Abonelik kaldırılırken bağlantı hatası oluştu.');
+      }
+    }
+
+    // Built-in Test logs receiver polling
+    async function pollWebhookLogs() {
+      if (activeSandboxTab !== 'webhook') return; // Only fetch if tab is open to save resource
+      try {
+        const res = await fetch('/api/webhooks/test-receiver');
+        if (res.ok) {
+          const logs = await res.json();
+          const container = document.getElementById('webhook-logs-container');
+          
+          if (logs.length === 0) {
+            container.innerHTML = `<div style="color: #64748b;">Henüz gelen bildirim yok. Canlı kazıcı çalışıp rötar tespit ettiğinde veya durum güncellendiğinde burada görüntülenecektir...</div>`;
+            return;
+          }
+
+          container.innerHTML = logs.map(log => `
+            <div style="margin-bottom: 0.75rem; padding-bottom: 0.75rem; border-bottom: 1px dashed #334155;">
+              <div style="display: flex; justify-content: space-between; font-size: 0.65rem; color: #a1a1aa; margin-bottom: 0.25rem;">
+                <span>🕒 Alınma Zamanı: ${new Date(log.receivedAt).toLocaleTimeString()}</span>
+                <span style="color: var(--accent-orange); font-weight: bold;">[${log.payload.event}]</span>
+              </div>
+              <pre style="margin: 0; background: #020617; padding: 0.5rem; border-radius: 4px; overflow-x: auto; color: #f0abfc;"><code>${JSON.stringify(log.payload.data, null, 2)}</code></pre>
+            </div>
+          `).join('');
+        }
+      } catch (e) {
+        console.error("Test alıcısı logları okunamadı:", e);
+      }
+    }
+
+    async function clearTestWebhookLogs() {
+      try {
+        const res = await fetch('/api/webhooks/test-receiver', { method: 'DELETE' });
+        if (res.ok) {
+          pollWebhookLogs();
+        }
+      } catch (e) {
+        console.error("Test logları temizlenemedi:", e);
+      }
+    }
+  </script>
+
+</body>
+</html>
