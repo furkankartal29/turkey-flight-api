@@ -1189,29 +1189,27 @@ app.get('/api/flights', (req, res) => {
     if (err) {
       return res.status(500).json({ success: false, error: err.message });
     }
-    fillMissingLegs(rows, (healedRows) => {
-      const flightsWithDelay = healedRows.map(r => {
-        const depDelay = calculateDelayMinutes(r.scheduledDeparture, r.actualDeparture);
-        const arrDelay = calculateDelayMinutes(r.scheduledArrival, r.actualArrival);
-        const statusInfo = getStandardizedStatus(r.status);
-        return { 
-          ...r, 
-          departureDelayMinutes: depDelay,
-          arrivalDelayMinutes: arrDelay,
-          scheduledDepartureUtc: convertToUtcIso(r.scheduledDeparture),
-          scheduledArrivalUtc: convertToUtcIso(r.scheduledArrival),
-          actualDepartureUtc: convertToUtcIso(r.actualDeparture),
-          actualArrivalUtc: convertToUtcIso(r.actualArrival),
-          statusCode: statusInfo.code,
-          statusText: statusInfo.text
-        };
-      });
-      res.json({
-        success: true,
-        count: flightsWithDelay.length,
-        timestamp: new Date().toISOString(),
-        flights: flightsWithDelay
-      });
+    const flightsWithDelay = rows.map(r => {
+      const depDelay = calculateDelayMinutes(r.scheduledDeparture, r.actualDeparture);
+      const arrDelay = calculateDelayMinutes(r.scheduledArrival, r.actualArrival);
+      const statusInfo = getStandardizedStatus(r.status);
+      return { 
+        ...r, 
+        departureDelayMinutes: depDelay,
+        arrivalDelayMinutes: arrDelay,
+        scheduledDepartureUtc: convertToUtcIso(r.scheduledDeparture),
+        scheduledArrivalUtc: convertToUtcIso(r.scheduledArrival),
+        actualDepartureUtc: convertToUtcIso(r.actualDeparture),
+        actualArrivalUtc: convertToUtcIso(r.actualArrival),
+        statusCode: statusInfo.code,
+        statusText: statusInfo.text
+      };
+    });
+    res.json({
+      success: true,
+      count: flightsWithDelay.length,
+      timestamp: new Date().toISOString(),
+      flights: flightsWithDelay
     });
   });
 });
