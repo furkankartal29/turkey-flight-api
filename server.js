@@ -906,8 +906,6 @@ async function persistFlights(newFlights) {
   const processedFlights = newFlights.map(f => {
     let scheduledDeparture = f.scheduledDeparture;
     let scheduledArrival = f.scheduledArrival;
-    let actualDeparture = f.actualDeparture;
-    let actualArrival = f.actualArrival;
     
     if (scheduledDeparture !== '-' && !scheduledDeparture.includes('T')) {
       scheduledDeparture = f.date + 'T' + scheduledDeparture;
@@ -915,14 +913,34 @@ async function persistFlights(newFlights) {
     if (scheduledArrival !== '-' && !scheduledArrival.includes('T')) {
       scheduledArrival = f.date + 'T' + scheduledArrival;
     }
+
+    // Overnight flight detection and date adjustment (+1 day for arrival)
+    if (scheduledDeparture !== '-' && scheduledArrival !== '-') {
+      const depDate = new Date(scheduledDeparture);
+      const arrDate = new Date(scheduledArrival);
+      if (!isNaN(depDate.getTime()) && !isNaN(arrDate.getTime()) && arrDate < depDate) {
+        arrDate.setDate(arrDate.getDate() + 1);
+        const year = arrDate.getFullYear();
+        const month = String(arrDate.getMonth() + 1).padStart(2, '0');
+        const day = String(arrDate.getDate()).padStart(2, '0');
+        const hours = String(arrDate.getHours()).padStart(2, '0');
+        const minutes = String(arrDate.getMinutes()).padStart(2, '0');
+        scheduledArrival = `${year}-${month}-${day}T${hours}:${minutes}`;
+      }
+    }
+
+    let actualDeparture = f.actualDeparture;
+    let actualArrival = f.actualArrival;
     
     if (actualDeparture !== '-' && !actualDeparture.includes('T')) {
       const schedTime = scheduledDeparture !== '-' ? scheduledDeparture.split('T')[1] : '00:00';
-      actualDeparture = resolveEstimatedDatetime(f.date, schedTime, actualDeparture);
+      const baseDate = scheduledDeparture !== '-' ? scheduledDeparture.split('T')[0] : f.date;
+      actualDeparture = resolveEstimatedDatetime(baseDate, schedTime, actualDeparture);
     }
     if (actualArrival !== '-' && !actualArrival.includes('T')) {
       const schedTime = scheduledArrival !== '-' ? scheduledArrival.split('T')[1] : '00:00';
-      actualArrival = resolveEstimatedDatetime(f.date, schedTime, actualArrival);
+      const baseDate = scheduledArrival !== '-' ? scheduledArrival.split('T')[0] : f.date;
+      actualArrival = resolveEstimatedDatetime(baseDate, schedTime, actualArrival);
     }
     
     return {
