@@ -320,11 +320,6 @@ function fillMissingLegs(flights, callback) {
               (err, rRow) => {
                 if (!err && rRow) {
                   applyDuration(f, rRow.scheduledDeparture, rRow.scheduledArrival);
-                } else {
-                  // Step 3: Default fallback
-                  const isDomestic = airportsDb[f.departureAirport] && airportsDb[f.arrivalAirport];
-                  const durationMin = isDomestic ? 70 : 150;
-                  applyMinutes(f, durationMin);
                 }
                 done();
               }
@@ -349,11 +344,6 @@ function fillMissingLegs(flights, callback) {
               (err, rRow) => {
                 if (!err && rRow) {
                   applyDurationBackwards(f, rRow.scheduledDeparture, rRow.scheduledArrival);
-                } else {
-                  // Step 3: Default fallback
-                  const isDomestic = airportsDb[f.departureAirport] && airportsDb[f.arrivalAirport];
-                  const durationMin = isDomestic ? 70 : 150;
-                  applyMinutesBackwards(f, durationMin);
                 }
                 done();
               }
@@ -389,6 +379,7 @@ function fillMissingLegs(flights, callback) {
       
       f.scheduledArrival = `${year}-${month}-${day}T${hours}:${minutes}`;
       f.actualArrival = f.scheduledArrival;
+      f.isEstimatedArrival = true; // Flag to indicate estimated
     }
   }
 
@@ -415,6 +406,7 @@ function fillMissingLegs(flights, callback) {
       
       f.scheduledDeparture = `${year}-${month}-${day}T${hours}:${minutes}`;
       f.actualDeparture = f.scheduledDeparture;
+      f.isEstimatedDeparture = true; // Flag to indicate estimated
     }
   }
 }
