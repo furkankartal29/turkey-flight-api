@@ -680,6 +680,9 @@
 
     // Initialize board on load
     window.addEventListener('DOMContentLoaded', async () => {
+      // Set default search date to today's date
+      document.getElementById('search-date').value = getTodayDateString();
+      
       updateSortIndicators();
       await loadAirportsDropdowns();
       await loadInitialStats();
