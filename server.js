@@ -325,10 +325,13 @@ function getStandardizedStatus(status) {
   return { code: 0, text: "UNKNOWN" };
 }
 
-// Helper to fill in missing departure or arrival legs using historical flight durations
+// Helper to fill in missing departure or arrival legs using historical flight durations with caching
 function fillMissingLegs(flights, callback) {
   let pending = flights.length;
   if (pending === 0) return callback(flights);
+
+  const flightCache = new Map(); // flightNumber -> durationMin
+  const routeCache = new Map();  // depIata-arrIata -> durationMin
 
   let completed = 0;
   const done = () => {
@@ -343,67 +346,73 @@ function fillMissingLegs(flights, callback) {
     const hasArr = f.scheduledArrival && f.scheduledArrival !== '-';
 
     if (hasDep && !hasArr) {
-      // Step 1: Query by flightNumber
-      db.get(
-        "SELECT scheduledDeparture, scheduledArrival FROM flights WHERE flightNumber = ? AND scheduledDeparture != '-' AND scheduledArrival != '-' ORDER BY date DESC LIMIT 1",
-        [f.flightNumber],
-        (err, row) => {
-          if (!err && row) {
-            applyDuration(f, row.scheduledDeparture, row.scheduledArrival);
-            done();
-          } else {
-            // Step 2: Query by route
-            db.get(
-              "SELECT scheduledDeparture, scheduledArrival FROM flights WHERE departureAirport = ? AND arrivalAirport = ? AND scheduledDeparture != '-' AND scheduledArrival != '-' ORDER BY date DESC LIMIT 1",
-              [f.departureAirport, f.arrivalAirport],
-              (err, rRow) => {
-                if (!err && rRow) {
-                  applyDuration(f, rRow.scheduledDeparture, rRow.scheduledArrival);
-                }
-                done();
-              }
-            );
-          }
+      resolveDuration(f.flightNumber, f.departureAirport, f.arrivalAirport, (durationMin) => {
+        if (durationMin > 0) {
+          applyMinutes(f, durationMin);
         }
-      );
+        done();
+      });
     } else if (hasArr && !hasDep) {
-      // Step 1: Query by flightNumber
-      db.get(
-        "SELECT scheduledDeparture, scheduledArrival FROM flights WHERE flightNumber = ? AND scheduledDeparture != '-' AND scheduledArrival != '-' ORDER BY date DESC LIMIT 1",
-        [f.flightNumber],
-        (err, row) => {
-          if (!err && row) {
-            applyDurationBackwards(f, row.scheduledDeparture, row.scheduledArrival);
-            done();
-          } else {
-            // Step 2: Query by route
-            db.get(
-              "SELECT scheduledDeparture, scheduledArrival FROM flights WHERE departureAirport = ? AND arrivalAirport = ? AND scheduledDeparture != '-' AND scheduledArrival != '-' ORDER BY date DESC LIMIT 1",
-              [f.departureAirport, f.arrivalAirport],
-              (err, rRow) => {
-                if (!err && rRow) {
-                  applyDurationBackwards(f, rRow.scheduledDeparture, rRow.scheduledArrival);
-                }
-                done();
-              }
-            );
-          }
+      resolveDuration(f.flightNumber, f.departureAirport, f.arrivalAirport, (durationMin) => {
+        if (durationMin > 0) {
+          applyMinutesBackwards(f, durationMin);
         }
-      );
+        done();
+      });
     } else {
       done();
     }
   });
 
-  function applyDuration(f, schedDep, schedArr) {
-    const sDep = new Date(schedDep);
-    const sArr = new Date(schedArr);
-    if (!isNaN(sDep.getTime()) && !isNaN(sArr.getTime())) {
-      const durationMin = Math.round((sArr - sDep) / 60000);
-      if (durationMin > 0 && durationMin < 1440) {
-        applyMinutes(f, durationMin);
-      }
+  function resolveDuration(flightNumber, dep, arr, cb) {
+    if (flightCache.has(flightNumber)) {
+      return cb(flightCache.get(flightNumber));
     }
+    
+    const routeKey = `${dep}-${arr}`;
+    if (routeCache.has(routeKey)) {
+      return cb(routeCache.get(routeKey));
+    }
+
+    // Step 1: Query by flightNumber
+    db.get(
+      "SELECT scheduledDeparture, scheduledArrival FROM flights WHERE flightNumber = ? AND scheduledDeparture != '-' AND scheduledArrival != '-' ORDER BY date DESC LIMIT 1",
+      [flightNumber],
+      (err, row) => {
+        if (!err && row) {
+          const sDep = new Date(row.scheduledDeparture);
+          const sArr = new Date(row.scheduledArrival);
+          if (!isNaN(sDep.getTime()) && !isNaN(sArr.getTime())) {
+            const dur = Math.round((sArr - sDep) / 60000);
+            if (dur > 0 && dur < 1440) {
+              flightCache.set(flightNumber, dur);
+              routeCache.set(routeKey, dur);
+              return cb(dur);
+            }
+          }
+        }
+
+        // Step 2: Query by route
+        db.get(
+          "SELECT scheduledDeparture, scheduledArrival FROM flights WHERE departureAirport = ? AND arrivalAirport = ? AND scheduledDeparture != '-' AND scheduledArrival != '-' ORDER BY date DESC LIMIT 1",
+          [dep, arr],
+          (err2, rRow) => {
+            if (!err2 && rRow) {
+              const sDep = new Date(rRow.scheduledDeparture);
+              const sArr = new Date(rRow.scheduledArrival);
+              if (!isNaN(sDep.getTime()) && !isNaN(sArr.getTime())) {
+                const dur = Math.round((sArr - sDep) / 60000);
+                if (dur > 0 && dur < 1440) {
+                  routeCache.set(routeKey, dur);
+                  return cb(dur);
+                }
+              }
+            }
+            cb(-1);
+          }
+        );
+      }
+    );
   }
 
   function applyMinutes(f, durationMin) {
@@ -418,18 +427,7 @@ function fillMissingLegs(flights, callback) {
       
       f.scheduledArrival = `${year}-${month}-${day}T${hours}:${minutes}`;
       f.actualArrival = f.scheduledArrival;
-      f.isEstimatedArrival = true; // Flag to indicate estimated
-    }
-  }
-
-  function applyDurationBackwards(f, schedDep, schedArr) {
-    const sDep = new Date(schedDep);
-    const sArr = new Date(schedArr);
-    if (!isNaN(sDep.getTime()) && !isNaN(sArr.getTime())) {
-      const durationMin = Math.round((sArr - sDep) / 60000);
-      if (durationMin > 0 && durationMin < 1440) {
-        applyMinutesBackwards(f, durationMin);
-      }
+      f.isEstimatedArrival = true;
     }
   }
 
@@ -445,7 +443,7 @@ function fillMissingLegs(flights, callback) {
       
       f.scheduledDeparture = `${year}-${month}-${day}T${hours}:${minutes}`;
       f.actualDeparture = f.scheduledDeparture;
-      f.isEstimatedDeparture = true; // Flag to indicate estimated
+      f.isEstimatedDeparture = true;
     }
   }
 }
