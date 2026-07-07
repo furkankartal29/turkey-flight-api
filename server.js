@@ -76,6 +76,9 @@ const db = new sqlite3.Database(DB_PATH, (err) => {
 
 function initializeDatabase() {
   db.serialize(() => {
+    // Enable Write-Ahead Logging (WAL) mode for concurrent read/write concurrency
+    db.run("PRAGMA journal_mode=WAL;");
+
     // Drop table if it has the old actualTime column to perform automatic schema migration
     db.all("PRAGMA table_info(flights)", [], (err, columns) => {
       if (!err && columns && columns.some(c => c.name === 'actualTime')) {
