@@ -304,67 +304,119 @@ function fillMissingLegs(flights, callback) {
     const hasArr = f.scheduledArrival && f.scheduledArrival !== '-';
 
     if (hasDep && !hasArr) {
+      // Step 1: Query by flightNumber
       db.get(
         "SELECT scheduledDeparture, scheduledArrival FROM flights WHERE flightNumber = ? AND scheduledDeparture != '-' AND scheduledArrival != '-' ORDER BY date DESC LIMIT 1",
         [f.flightNumber],
         (err, row) => {
           if (!err && row) {
-            const sDep = new Date(row.scheduledDeparture);
-            const sArr = new Date(row.scheduledArrival);
-            if (!isNaN(sDep.getTime()) && !isNaN(sArr.getTime())) {
-              const durationMin = Math.round((sArr - sDep) / 60000);
-              if (durationMin > 0 && durationMin < 1440) {
-                const currentDep = new Date(f.scheduledDeparture);
-                if (!isNaN(currentDep.getTime())) {
-                  const estArr = new Date(currentDep.getTime() + durationMin * 60000);
-                  const year = estArr.getFullYear();
-                  const month = String(estArr.getMonth() + 1).padStart(2, '0');
-                  const day = String(estArr.getDate()).padStart(2, '0');
-                  const hours = String(estArr.getHours()).padStart(2, '0');
-                  const minutes = String(estArr.getMinutes()).padStart(2, '0');
-                  
-                  f.scheduledArrival = `${year}-${month}-${day}T${hours}:${minutes}`;
-                  f.actualArrival = f.scheduledArrival;
+            applyDuration(f, row.scheduledDeparture, row.scheduledArrival);
+            done();
+          } else {
+            // Step 2: Query by route
+            db.get(
+              "SELECT scheduledDeparture, scheduledArrival FROM flights WHERE departureAirport = ? AND arrivalAirport = ? AND scheduledDeparture != '-' AND scheduledArrival != '-' ORDER BY date DESC LIMIT 1",
+              [f.departureAirport, f.arrivalAirport],
+              (err, rRow) => {
+                if (!err && rRow) {
+                  applyDuration(f, rRow.scheduledDeparture, rRow.scheduledArrival);
+                } else {
+                  // Step 3: Default fallback
+                  const isDomestic = airportsDb[f.departureAirport] && airportsDb[f.arrivalAirport];
+                  const durationMin = isDomestic ? 70 : 150;
+                  applyMinutes(f, durationMin);
                 }
+                done();
               }
-            }
+            );
           }
-          done();
         }
       );
     } else if (hasArr && !hasDep) {
+      // Step 1: Query by flightNumber
       db.get(
         "SELECT scheduledDeparture, scheduledArrival FROM flights WHERE flightNumber = ? AND scheduledDeparture != '-' AND scheduledArrival != '-' ORDER BY date DESC LIMIT 1",
         [f.flightNumber],
         (err, row) => {
           if (!err && row) {
-            const sDep = new Date(row.scheduledDeparture);
-            const sArr = new Date(row.scheduledArrival);
-            if (!isNaN(sDep.getTime()) && !isNaN(sArr.getTime())) {
-              const durationMin = Math.round((sArr - sDep) / 60000);
-              if (durationMin > 0 && durationMin < 1440) {
-                const currentArr = new Date(f.scheduledArrival);
-                if (!isNaN(currentArr.getTime())) {
-                  const estDep = new Date(currentArr.getTime() - durationMin * 60000);
-                  const year = estDep.getFullYear();
-                  const month = String(estDep.getMonth() + 1).padStart(2, '0');
-                  const day = String(estDep.getDate()).padStart(2, '0');
-                  const hours = String(estDep.getHours()).padStart(2, '0');
-                  const minutes = String(estDep.getMinutes()).padStart(2, '0');
-                  
-                  f.scheduledDeparture = `${year}-${month}-${day}T${hours}:${minutes}`;
-                  f.actualDeparture = f.scheduledDeparture;
+            applyDurationBackwards(f, row.scheduledDeparture, row.scheduledArrival);
+            done();
+          } else {
+            // Step 2: Query by route
+            db.get(
+              "SELECT scheduledDeparture, scheduledArrival FROM flights WHERE departureAirport = ? AND arrivalAirport = ? AND scheduledDeparture != '-' AND scheduledArrival != '-' ORDER BY date DESC LIMIT 1",
+              [f.departureAirport, f.arrivalAirport],
+              (err, rRow) => {
+                if (!err && rRow) {
+                  applyDurationBackwards(f, rRow.scheduledDeparture, rRow.scheduledArrival);
+                } else {
+                  // Step 3: Default fallback
+                  const isDomestic = airportsDb[f.departureAirport] && airportsDb[f.arrivalAirport];
+                  const durationMin = isDomestic ? 70 : 150;
+                  applyMinutesBackwards(f, durationMin);
                 }
+                done();
               }
-            }
+            );
           }
-          done();
         }
       );
     } else {
       done();
     }
   });
+
+  function applyDuration(f, schedDep, schedArr) {
+    const sDep = new Date(schedDep);
+    const sArr = new Date(schedArr);
+    if (!isNaN(sDep.getTime()) && !isNaN(sArr.getTime())) {
+      const durationMin = Math.round((sArr - sDep) / 60000);
+      if (durationMin > 0 && durationMin < 1440) {
+        applyMinutes(f, durationMin);
+      }
+    }
+  }
+
+  function applyMinutes(f, durationMin) {
+    const currentDep = new Date(f.scheduledDeparture);
+    if (!isNaN(currentDep.getTime())) {
+      const estArr = new Date(currentDep.getTime() + durationMin * 60000);
+      const year = estArr.getFullYear();
+      const month = String(estArr.getMonth() + 1).padStart(2, '0');
+      const day = String(estArr.getDate()).padStart(2, '0');
+      const hours = String(estArr.getHours()).padStart(2, '0');
+      const minutes = String(estArr.getMinutes()).padStart(2, '0');
+      
+      f.scheduledArrival = `${year}-${month}-${day}T${hours}:${minutes}`;
+      f.actualArrival = f.scheduledArrival;
+    }
+  }
+
+  function applyDurationBackwards(f, schedDep, schedArr) {
+    const sDep = new Date(schedDep);
+    const sArr = new Date(schedArr);
+    if (!isNaN(sDep.getTime()) && !isNaN(sArr.getTime())) {
+      const durationMin = Math.round((sArr - sDep) / 60000);
+      if (durationMin > 0 && durationMin < 1440) {
+        applyMinutesBackwards(f, durationMin);
+      }
+    }
+  }
+
+  function applyMinutesBackwards(f, durationMin) {
+    const currentArr = new Date(f.scheduledArrival);
+    if (!isNaN(currentArr.getTime())) {
+      const estDep = new Date(currentArr.getTime() - durationMin * 60000);
+      const year = estDep.getFullYear();
+      const month = String(estDep.getMonth() + 1).padStart(2, '0');
+      const day = String(estDep.getDate()).padStart(2, '0');
+      const hours = String(estDep.getHours()).padStart(2, '0');
+      const minutes = String(estDep.getMinutes()).padStart(2, '0');
+      
+      f.scheduledDeparture = `${year}-${month}-${day}T${hours}:${minutes}`;
+      f.actualDeparture = f.scheduledDeparture;
+    }
+  }
 }
 
 // Parser for Sabiha Gökçen flight table
