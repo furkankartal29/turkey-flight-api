@@ -286,6 +286,45 @@ function resolveEstimatedDatetime(scheduledDateStr, scheduledTime, estimatedTime
   return `${year}-${month}-${day}T${hours}:${minutes}`;
 }
 
+// Helper to convert Turkey local datetime string to UTC ISO timestamp
+function convertToUtcIso(localIsoStr) {
+  if (!localIsoStr || localIsoStr === '-') return '-';
+  try {
+    if (localIsoStr.endsWith('Z') || localIsoStr.includes('+')) {
+      return new Date(localIsoStr).toISOString();
+    }
+    const d = new Date(localIsoStr + '+03:00');
+    if (isNaN(d.getTime())) return '-';
+    return d.toISOString();
+  } catch (e) {
+    return '-';
+  }
+}
+
+// Helper to standardize flight statuses to numeric codes and uppercase tokens
+function getStandardizedStatus(status) {
+  if (!status || status === '-') {
+    return { code: 0, text: "UNKNOWN" };
+  }
+  const s = status.toUpperCase();
+  if (s.includes('İNDİ') || s.includes('LANDED') || s.includes('UÇUŞ YAPILDI') || s.includes('UÇULDU')) {
+    return { code: 4, text: "LANDED" };
+  }
+  if (s.includes('İPTAL') || s.includes('CANCEL')) {
+    return { code: 5, text: "CANCELLED" };
+  }
+  if (s.includes('GECİKME') || s.includes('DELAY') || s.includes('RÖTAR')) {
+    return { code: 2, text: "DELAYED" };
+  }
+  if (s.includes('KAPI') || s.includes('BOARD') || s.includes('ÇAĞRI') || s.includes('CALL') || s.includes('YAKLAŞIYOR') || s.includes('HAVADA') || s.includes('BİNİŞ')) {
+    return { code: 3, text: "BOARDING" };
+  }
+  if (s.includes('PLAN') || s.includes('SCHED')) {
+    return { code: 1, text: "SCHEDULED" };
+  }
+  return { code: 0, text: "UNKNOWN" };
+}
+
 // Helper to fill in missing departure or arrival legs using historical flight durations
 function fillMissingLegs(flights, callback) {
   let pending = flights.length;
@@ -1149,10 +1188,17 @@ app.get('/api/flights', (req, res) => {
       const flightsWithDelay = healedRows.map(r => {
         const depDelay = calculateDelayMinutes(r.scheduledDeparture, r.actualDeparture);
         const arrDelay = calculateDelayMinutes(r.scheduledArrival, r.actualArrival);
+        const statusInfo = getStandardizedStatus(r.status);
         return { 
           ...r, 
           departureDelayMinutes: depDelay,
-          arrivalDelayMinutes: arrDelay 
+          arrivalDelayMinutes: arrDelay,
+          scheduledDepartureUtc: convertToUtcIso(r.scheduledDeparture),
+          scheduledArrivalUtc: convertToUtcIso(r.scheduledArrival),
+          actualDepartureUtc: convertToUtcIso(r.actualDeparture),
+          actualArrivalUtc: convertToUtcIso(r.actualArrival),
+          statusCode: statusInfo.code,
+          statusText: statusInfo.text
         };
       });
       res.json({
@@ -1305,10 +1351,17 @@ app.get('/api/flights/search', (req, res) => {
       const processedRowsWithDelay = healedRows.map(r => {
         const depDelay = calculateDelayMinutes(r.scheduledDeparture, r.actualDeparture);
         const arrDelay = calculateDelayMinutes(r.scheduledArrival, r.actualArrival);
+        const statusInfo = getStandardizedStatus(r.status);
         return { 
           ...r, 
           departureDelayMinutes: depDelay,
-          arrivalDelayMinutes: arrDelay 
+          arrivalDelayMinutes: arrDelay,
+          scheduledDepartureUtc: convertToUtcIso(r.scheduledDeparture),
+          scheduledArrivalUtc: convertToUtcIso(r.scheduledArrival),
+          actualDepartureUtc: convertToUtcIso(r.actualDeparture),
+          actualArrivalUtc: convertToUtcIso(r.actualArrival),
+          statusCode: statusInfo.code,
+          statusText: statusInfo.text
         };
       });
 
