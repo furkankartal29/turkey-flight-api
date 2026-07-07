@@ -286,6 +286,87 @@ function resolveEstimatedDatetime(scheduledDateStr, scheduledTime, estimatedTime
   return `${year}-${month}-${day}T${hours}:${minutes}`;
 }
 
+// Helper to fill in missing departure or arrival legs using historical flight durations
+function fillMissingLegs(flights, callback) {
+  let pending = flights.length;
+  if (pending === 0) return callback(flights);
+
+  let completed = 0;
+  const done = () => {
+    completed++;
+    if (completed === pending) {
+      callback(flights);
+    }
+  };
+
+  flights.forEach(f => {
+    const hasDep = f.scheduledDeparture && f.scheduledDeparture !== '-';
+    const hasArr = f.scheduledArrival && f.scheduledArrival !== '-';
+
+    if (hasDep && !hasArr) {
+      db.get(
+        "SELECT scheduledDeparture, scheduledArrival FROM flights WHERE flightNumber = ? AND scheduledDeparture != '-' AND scheduledArrival != '-' ORDER BY date DESC LIMIT 1",
+        [f.flightNumber],
+        (err, row) => {
+          if (!err && row) {
+            const sDep = new Date(row.scheduledDeparture);
+            const sArr = new Date(row.scheduledArrival);
+            if (!isNaN(sDep.getTime()) && !isNaN(sArr.getTime())) {
+              const durationMin = Math.round((sArr - sDep) / 60000);
+              if (durationMin > 0 && durationMin < 1440) {
+                const currentDep = new Date(f.scheduledDeparture);
+                if (!isNaN(currentDep.getTime())) {
+                  const estArr = new Date(currentDep.getTime() + durationMin * 60000);
+                  const year = estArr.getFullYear();
+                  const month = String(estArr.getMonth() + 1).padStart(2, '0');
+                  const day = String(estArr.getDate()).padStart(2, '0');
+                  const hours = String(estArr.getHours()).padStart(2, '0');
+                  const minutes = String(estArr.getMinutes()).padStart(2, '0');
+                  
+                  f.scheduledArrival = `${year}-${month}-${day}T${hours}:${minutes}`;
+                  f.actualArrival = f.scheduledArrival;
+                }
+              }
+            }
+          }
+          done();
+        }
+      );
+    } else if (hasArr && !hasDep) {
+      db.get(
+        "SELECT scheduledDeparture, scheduledArrival FROM flights WHERE flightNumber = ? AND scheduledDeparture != '-' AND scheduledArrival != '-' ORDER BY date DESC LIMIT 1",
+        [f.flightNumber],
+        (err, row) => {
+          if (!err && row) {
+            const sDep = new Date(row.scheduledDeparture);
+            const sArr = new Date(row.scheduledArrival);
+            if (!isNaN(sDep.getTime()) && !isNaN(sArr.getTime())) {
+              const durationMin = Math.round((sArr - sDep) / 60000);
+              if (durationMin > 0 && durationMin < 1440) {
+                const currentArr = new Date(f.scheduledArrival);
+                if (!isNaN(currentArr.getTime())) {
+                  const estDep = new Date(currentArr.getTime() - durationMin * 60000);
+                  const year = estDep.getFullYear();
+                  const month = String(estDep.getMonth() + 1).padStart(2, '0');
+                  const day = String(estDep.getDate()).padStart(2, '0');
+                  const hours = String(estDep.getHours()).padStart(2, '0');
+                  const minutes = String(estDep.getMinutes()).padStart(2, '0');
+                  
+                  f.scheduledDeparture = `${year}-${month}-${day}T${hours}:${minutes}`;
+                  f.actualDeparture = f.scheduledDeparture;
+                }
+              }
+            }
+          }
+          done();
+        }
+      );
+    } else {
+      done();
+    }
+  });
+}
+
 // Parser for Sabiha Gökçen flight table
 function parseSawTable(html, type, todayStr) {
   const isDeparture = type === 'departures';
@@ -1020,20 +1101,22 @@ app.get('/api/flights', (req, res) => {
     if (err) {
       return res.status(500).json({ success: false, error: err.message });
     }
-    const flightsWithDelay = rows.map(r => {
-      const depDelay = calculateDelayMinutes(r.scheduledDeparture, r.actualDeparture);
-      const arrDelay = calculateDelayMinutes(r.scheduledArrival, r.actualArrival);
-      return { 
-        ...r, 
-        departureDelayMinutes: depDelay,
-        arrivalDelayMinutes: arrDelay 
-      };
-    });
-    res.json({
-      success: true,
-      count: flightsWithDelay.length,
-      timestamp: new Date().toISOString(),
-      flights: flightsWithDelay
+    fillMissingLegs(rows, (healedRows) => {
+      const flightsWithDelay = healedRows.map(r => {
+        const depDelay = calculateDelayMinutes(r.scheduledDeparture, r.actualDeparture);
+        const arrDelay = calculateDelayMinutes(r.scheduledArrival, r.actualArrival);
+        return { 
+          ...r, 
+          departureDelayMinutes: depDelay,
+          arrivalDelayMinutes: arrDelay 
+        };
+      });
+      res.json({
+        success: true,
+        count: flightsWithDelay.length,
+        timestamp: new Date().toISOString(),
+        flights: flightsWithDelay
+      });
     });
   });
 });
@@ -1174,31 +1257,33 @@ app.get('/api/flights/search', (req, res) => {
       processedRows.push(current);
     }
 
-    const processedRowsWithDelay = processedRows.map(r => {
-      const depDelay = calculateDelayMinutes(r.scheduledDeparture, r.actualDeparture);
-      const arrDelay = calculateDelayMinutes(r.scheduledArrival, r.actualArrival);
-      return { 
-        ...r, 
-        departureDelayMinutes: depDelay,
-        arrivalDelayMinutes: arrDelay 
-      };
-    });
+    fillMissingLegs(processedRows, (healedRows) => {
+      const processedRowsWithDelay = healedRows.map(r => {
+        const depDelay = calculateDelayMinutes(r.scheduledDeparture, r.actualDeparture);
+        const arrDelay = calculateDelayMinutes(r.scheduledArrival, r.actualArrival);
+        return { 
+          ...r, 
+          departureDelayMinutes: depDelay,
+          arrivalDelayMinutes: arrDelay 
+        };
+      });
 
-    // Find the best match for the requested dateStr
-    let bestMatch = processedRowsWithDelay.find(f => f.date === dateStr);
-    if (!bestMatch && processedRowsWithDelay.length > 0) {
-      bestMatch = processedRowsWithDelay[0];
-    }
+      // Find the best match for the requested dateStr
+      let bestMatch = processedRowsWithDelay.find(f => f.date === dateStr);
+      if (!bestMatch && processedRowsWithDelay.length > 0) {
+        bestMatch = processedRowsWithDelay[0];
+      }
 
-    res.json({
-      success: true,
-      query: {
-        flightNumber: flightNumber,
-        date: dateStr
-      },
-      count: processedRowsWithDelay.length,
-      flights: processedRowsWithDelay,
-      flight: bestMatch
+      res.json({
+        success: true,
+        query: {
+          flightNumber: flightNumber,
+          date: dateStr
+        },
+        count: processedRowsWithDelay.length,
+        flights: processedRowsWithDelay,
+        flight: bestMatch
+      });
     });
   });
 });
