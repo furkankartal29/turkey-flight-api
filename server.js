@@ -236,6 +236,32 @@ function getCorrectFlightDate(baseDateStr, flightTimeStr) {
   return `${year}-${month}-${day}`;
 }
 
+// Helper to determine the flight date (based on departure date) for both departures and arrivals
+function getFlightDate(baseDateStr, timeStr, isDeparture, depAirport, arrAirport) {
+  const correctedDate = getCorrectFlightDate(baseDateStr, timeStr);
+  if (isDeparture) {
+    return correctedDate;
+  }
+  
+  if (!timeStr || timeStr === '-') return correctedDate;
+  const [hours, minutes] = timeStr.split(':').map(Number);
+  if (isNaN(hours)) return correctedDate;
+  
+  const [year, month, day] = correctedDate.split('-').map(Number);
+  const arrDate = new Date(year, month - 1, day, hours, minutes, 0);
+  
+  // Estimate flight duration (domestic = 70 mins, international = 150 mins)
+  const isDomestic = airportsDb[depAirport] && airportsDb[arrAirport];
+  const durationMin = isDomestic ? 70 : 150;
+  
+  const depDate = new Date(arrDate.getTime() - durationMin * 60000);
+  const depYear = depDate.getFullYear();
+  const depMonth = String(depDate.getMonth() + 1).padStart(2, '0');
+  const depDay = String(depDate.getDate()).padStart(2, '0');
+  
+  return `${depYear}-${depMonth}-${depDay}`;
+}
+
 // Helper to calculate delay in minutes using full ISO datetimes
 function calculateDelayMinutes(scheduledIso, actualIso) {
   if (!scheduledIso || scheduledIso === '-' || !actualIso || actualIso === '-') return 0;
@@ -492,19 +518,21 @@ function parseSawTable(html, type, todayStr) {
       
       const depIata = isDeparture ? "SAW" : targetCode;
       const arrIata = isDeparture ? targetCode : "SAW";
+      const flightDate = getFlightDate(todayStr, scheduled, isDeparture, depIata, arrIata);
+      const arrivalBaseDate = getCorrectFlightDate(todayStr, scheduled);
 
       flights.push({
         flightNumber: flightNum,
-        date: getCorrectFlightDate(todayStr, scheduled),
+        date: flightDate,
         airline: airline || getAirlineName(flightNum),
         departureAirport: depIata,
         arrivalAirport: arrIata,
         departureCity: getAirportCity(depIata) || (isDeparture ? "İstanbul" : cityRaw),
         arrivalCity: getAirportCity(arrIata) || (isDeparture ? cityRaw : "İstanbul"),
         scheduledDeparture: isDeparture ? scheduled : "-",
-        scheduledArrival: isDeparture ? "-" : scheduled,
+        scheduledArrival: isDeparture ? "-" : (arrivalBaseDate + "T" + scheduled),
         actualDeparture: isDeparture ? (estimated || scheduled) : "-",
-        actualArrival: isDeparture ? "-" : (estimated || scheduled),
+        actualArrival: isDeparture ? "-" : (arrivalBaseDate + "T" + (estimated || scheduled)),
         terminal: 'Ana Terminal',
         gate: gate,
         status: status || "Planlandı"
@@ -570,14 +598,17 @@ async function fetchIstFlights(nature, todayStr) {
           if (data.status === true && data.result && data.result.data && data.result.data.flights) {
             data.result.data.flights.forEach(item => {
               const flightNum = item.flightNumber.replace(/\s+/g, '').toUpperCase();
-              const date = item.scheduledDatetime ? item.scheduledDatetime.split('T')[0] : todayStr;
               
               const depIata = item.fromCityCode || (nature === 1 ? "IST" : "-");
               const arrIata = item.toCityCode || (nature === 1 ? "-" : "IST");
 
+              const schedTime = item.scheduledDatetime ? item.scheduledDatetime.split('T')[1].slice(0, 5) : '';
+              const baseDate = item.scheduledDatetime ? item.scheduledDatetime.split('T')[0] : todayStr;
+              const flightDate = getFlightDate(baseDate, schedTime, nature === 1, depIata, arrIata);
+
               const flightObj = {
                 flightNumber: flightNum,
-                date: date,
+                date: flightDate,
                 airline: item.airlineName || getAirlineName(flightNum),
                 departureAirport: depIata,
                 arrivalAirport: arrIata,
@@ -758,20 +789,21 @@ async function fetchDhmiFlights(todayStr) {
                 const depIata = isDeparture ? ap.iata : targetCode;
                 const arrIata = isDeparture ? targetCode : ap.iata;
                 
+                const correctedDate = getFlightDate(flightDate, item.Planned, isDeparture, depIata, arrIata);
                 const status = item.Status || "Planlandı";
                 
                 flights.push({
                   flightNumber: flightNum,
-                  date: flightDate,
+                  date: correctedDate,
                   airline: item.Airline || getAirlineName(flightNum),
                   departureAirport: depIata,
                   arrivalAirport: arrIata,
                   departureCity: getAirportCity(depIata) || (isDeparture ? getAirportCity(ap.iata) : item.SrcDst),
                   arrivalCity: getAirportCity(arrIata) || (isDeparture ? item.SrcDst : getAirportCity(ap.iata)),
                   scheduledDeparture: isDeparture ? item.Planned : "-",
-                  scheduledArrival: isDeparture ? "-" : item.Planned,
+                  scheduledArrival: isDeparture ? "-" : (flightDate + "T" + item.Planned),
                   actualDeparture: isDeparture ? (item.Estimated || item.Planned) : "-",
-                  actualArrival: isDeparture ? "-" : (item.Estimated || item.Planned),
+                  actualArrival: isDeparture ? "-" : (flightDate + "T" + (item.Estimated || item.Planned)),
                   terminal: 'Ana Terminal',
                   gate: item.Gate || "-",
                   status: status
