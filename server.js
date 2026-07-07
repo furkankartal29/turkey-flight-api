@@ -236,31 +236,6 @@ function getCorrectFlightDate(baseDateStr, flightTimeStr) {
   return `${year}-${month}-${day}`;
 }
 
-// Helper to determine the flight date (based on departure date) for both departures and arrivals
-function getFlightDate(baseDateStr, timeStr, isDeparture, depAirport, arrAirport) {
-  const correctedDate = getCorrectFlightDate(baseDateStr, timeStr);
-  if (isDeparture) {
-    return correctedDate;
-  }
-  
-  if (!timeStr || timeStr === '-') return correctedDate;
-  const [hours, minutes] = timeStr.split(':').map(Number);
-  if (isNaN(hours)) return correctedDate;
-  
-  const [year, month, day] = correctedDate.split('-').map(Number);
-  const arrDate = new Date(year, month - 1, day, hours, minutes, 0);
-  
-  // Estimate flight duration (domestic = 70 mins, international = 150 mins)
-  const isDomestic = airportsDb[depAirport] && airportsDb[arrAirport];
-  const durationMin = isDomestic ? 70 : 150;
-  
-  const depDate = new Date(arrDate.getTime() - durationMin * 60000);
-  const depYear = depDate.getFullYear();
-  const depMonth = String(depDate.getMonth() + 1).padStart(2, '0');
-  const depDay = String(depDate.getDate()).padStart(2, '0');
-  
-  return `${depYear}-${depMonth}-${depDay}`;
-}
 
 // Helper to calculate delay in minutes using full ISO datetimes
 function calculateDelayMinutes(scheduledIso, actualIso) {
@@ -518,8 +493,7 @@ function parseSawTable(html, type, todayStr) {
       
       const depIata = isDeparture ? "SAW" : targetCode;
       const arrIata = isDeparture ? targetCode : "SAW";
-      const flightDate = getFlightDate(todayStr, scheduled, isDeparture, depIata, arrIata);
-      const arrivalBaseDate = getCorrectFlightDate(todayStr, scheduled);
+      const flightDate = getCorrectFlightDate(todayStr, scheduled);
 
       flights.push({
         flightNumber: flightNum,
@@ -530,9 +504,9 @@ function parseSawTable(html, type, todayStr) {
         departureCity: getAirportCity(depIata) || (isDeparture ? "İstanbul" : cityRaw),
         arrivalCity: getAirportCity(arrIata) || (isDeparture ? cityRaw : "İstanbul"),
         scheduledDeparture: isDeparture ? scheduled : "-",
-        scheduledArrival: isDeparture ? "-" : (arrivalBaseDate + "T" + scheduled),
+        scheduledArrival: isDeparture ? "-" : scheduled,
         actualDeparture: isDeparture ? (estimated || scheduled) : "-",
-        actualArrival: isDeparture ? "-" : (arrivalBaseDate + "T" + (estimated || scheduled)),
+        actualArrival: isDeparture ? "-" : (estimated || scheduled),
         terminal: 'Ana Terminal',
         gate: gate,
         status: status || "Planlandı"
@@ -602,13 +576,11 @@ async function fetchIstFlights(nature, todayStr) {
               const depIata = item.fromCityCode || (nature === 1 ? "IST" : "-");
               const arrIata = item.toCityCode || (nature === 1 ? "-" : "IST");
 
-              const schedTime = item.scheduledDatetime ? item.scheduledDatetime.split('T')[1].slice(0, 5) : '';
               const baseDate = item.scheduledDatetime ? item.scheduledDatetime.split('T')[0] : todayStr;
-              const flightDate = getFlightDate(baseDate, schedTime, nature === 1, depIata, arrIata);
 
               const flightObj = {
                 flightNumber: flightNum,
-                date: flightDate,
+                date: baseDate,
                 airline: item.airlineName || getAirlineName(flightNum),
                 departureAirport: depIata,
                 arrivalAirport: arrIata,
@@ -789,21 +761,20 @@ async function fetchDhmiFlights(todayStr) {
                 const depIata = isDeparture ? ap.iata : targetCode;
                 const arrIata = isDeparture ? targetCode : ap.iata;
                 
-                const correctedDate = getFlightDate(flightDate, item.Planned, isDeparture, depIata, arrIata);
                 const status = item.Status || "Planlandı";
                 
                 flights.push({
                   flightNumber: flightNum,
-                  date: correctedDate,
+                  date: flightDate,
                   airline: item.Airline || getAirlineName(flightNum),
                   departureAirport: depIata,
                   arrivalAirport: arrIata,
                   departureCity: getAirportCity(depIata) || (isDeparture ? getAirportCity(ap.iata) : item.SrcDst),
                   arrivalCity: getAirportCity(arrIata) || (isDeparture ? item.SrcDst : getAirportCity(ap.iata)),
                   scheduledDeparture: isDeparture ? item.Planned : "-",
-                  scheduledArrival: isDeparture ? "-" : (flightDate + "T" + item.Planned),
+                  scheduledArrival: isDeparture ? "-" : item.Planned,
                   actualDeparture: isDeparture ? (item.Estimated || item.Planned) : "-",
-                  actualArrival: isDeparture ? "-" : (flightDate + "T" + (item.Estimated || item.Planned)),
+                  actualArrival: isDeparture ? "-" : (item.Estimated || item.Planned),
                   terminal: 'Ana Terminal',
                   gate: item.Gate || "-",
                   status: status
@@ -1181,6 +1152,98 @@ app.get('/api/status', (req, res) => {
   });
 });
 
+// Helper function to merge independent departure and arrival flight legs
+function mergeFlightLegs(rows) {
+  const groups = {};
+  rows.forEach(r => {
+    if (!groups[r.flightNumber]) {
+      groups[r.flightNumber] = [];
+    }
+    groups[r.flightNumber].push(r);
+  });
+
+  const mergedFlights = [];
+
+  Object.keys(groups).forEach(flightNumber => {
+    const flightRows = groups[flightNumber];
+
+    const departures = [];
+    const arrivals = [];
+    const completed = [];
+
+    flightRows.forEach(r => {
+      const hasDep = r.scheduledDeparture && r.scheduledDeparture !== '-';
+      const hasArr = r.scheduledArrival && r.scheduledArrival !== '-';
+
+      if (hasDep && hasArr) {
+        completed.push({ ...r });
+      } else if (hasDep) {
+        departures.push({ ...r });
+      } else if (hasArr) {
+        arrivals.push({ ...r });
+      }
+    });
+
+    departures.sort((a, b) => a.scheduledDeparture.localeCompare(b.scheduledDeparture));
+    arrivals.sort((a, b) => a.scheduledArrival.localeCompare(b.scheduledArrival));
+
+    const matchedArrivals = new Set();
+
+    departures.forEach(dep => {
+      let bestArr = null;
+      let bestArrIndex = -1;
+      let minDiff = Infinity;
+
+      const depTime = new Date(dep.scheduledDeparture).getTime();
+
+      for (let j = 0; j < arrivals.length; j++) {
+        if (matchedArrivals.has(j)) continue;
+
+        const arr = arrivals[j];
+        if (dep.departureAirport !== arr.departureAirport || dep.arrivalAirport !== arr.arrivalAirport) {
+          continue;
+        }
+
+        const arrTime = new Date(arr.scheduledArrival).getTime();
+        const diff = arrTime - depTime;
+
+        // Arrival must be after departure, and flight duration between 20 mins and 18 hours
+        if (diff > 20 * 60 * 1000 && diff < 18 * 60 * 60 * 1000) {
+          if (diff < minDiff) {
+            minDiff = diff;
+            bestArr = arr;
+            bestArrIndex = j;
+          }
+        }
+      }
+
+      if (bestArr) {
+        matchedArrivals.add(bestArrIndex);
+        mergedFlights.push({
+          ...dep,
+          scheduledArrival: bestArr.scheduledArrival,
+          actualArrival: bestArr.actualArrival !== '-' ? bestArr.actualArrival : dep.actualArrival,
+          terminal: bestArr.terminal !== 'Ana Terminal' ? bestArr.terminal : dep.terminal,
+          gate: bestArr.gate !== '-' ? bestArr.gate : dep.gate,
+          status: bestArr.status !== 'Planlandı' && bestArr.status !== '-' ? bestArr.status : dep.status
+        });
+      } else {
+        mergedFlights.push(dep);
+      }
+    });
+
+    arrivals.forEach((arr, idx) => {
+      if (!matchedArrivals.has(idx)) {
+        mergedFlights.push(arr);
+      }
+    });
+
+    completed.forEach(c => mergedFlights.push(c));
+  });
+
+  return mergedFlights;
+}
+
 // Main combined list of flights
 app.get('/api/flights', (req, res) => {
   let query = "SELECT * FROM flights WHERE 1=1";
@@ -1225,10 +1288,20 @@ app.get('/api/flights', (req, res) => {
     params.push(`%${req.query.flight.replace(/\s+/g, '').trim()}%`);
   }
 
-  // Date Filter
+  // Date Filter (Query yesterday, today, and tomorrow to find and merge complementary overnight flight legs)
   const dateStr = req.query.date ? req.query.date.trim() : getLocalDateString();
-  query += " AND date = ?";
-  params.push(dateStr);
+  const today = new Date(dateStr);
+  
+  const yesterday = new Date(today);
+  yesterday.setDate(yesterday.getDate() - 1);
+  const yStr = `${yesterday.getFullYear()}-${String(yesterday.getMonth() + 1).padStart(2, '0')}-${String(yesterday.getDate()).padStart(2, '0')}`;
+  
+  const tomorrow = new Date(today);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  const tStr = `${tomorrow.getFullYear()}-${String(tomorrow.getMonth() + 1).padStart(2, '0')}-${String(tomorrow.getDate()).padStart(2, '0')}`;
+
+  query += " AND date IN (?, ?, ?)";
+  params.push(yStr, dateStr, tStr);
 
   // Delayed Filter
   if (req.query.delayed === 'true') {
@@ -1239,7 +1312,20 @@ app.get('/api/flights', (req, res) => {
     if (err) {
       return res.status(500).json({ success: false, error: err.message });
     }
-    const flightsWithDelay = rows.map(r => {
+    
+    // Merge flight legs
+    const merged = mergeFlightLegs(rows);
+    
+    // Filter to only include flights departing on the requested date (or arriving if departure is missing)
+    const filtered = merged.filter(f => {
+      const depTime = f.scheduledDeparture && f.scheduledDeparture !== '-' ? f.scheduledDeparture : f.scheduledArrival;
+      if (depTime && depTime.includes('T')) {
+        return depTime.split('T')[0] === dateStr;
+      }
+      return f.date === dateStr;
+    });
+
+    const flightsWithDelay = filtered.map(r => {
       const depDelay = calculateDelayMinutes(r.scheduledDeparture, r.actualDeparture);
       const arrDelay = calculateDelayMinutes(r.scheduledArrival, r.actualArrival);
       const statusInfo = getStandardizedStatus(r.status);
@@ -1255,6 +1341,7 @@ app.get('/api/flights', (req, res) => {
         statusText: statusInfo.text
       };
     });
+    
     res.json({
       success: true,
       count: flightsWithDelay.length,
@@ -1317,90 +1404,10 @@ app.get('/api/flights/search', (req, res) => {
       });
     }
 
-    // Sort rows by date ascending, then by departure/arrival time
-    rows.sort((a, b) => {
-      if (a.date !== b.date) return a.date.localeCompare(b.date);
-      const timeA = a.scheduledDeparture !== '-' ? a.scheduledDeparture : a.scheduledArrival;
-      const timeB = b.scheduledDeparture !== '-' ? b.scheduledDeparture : b.scheduledArrival;
-      return timeA.localeCompare(timeB);
-    });
+    // Merge complementary legs using the same unified logic
+    const merged = mergeFlightLegs(rows);
 
-    // Merge complementary adjacent-day rows (overnight flights)
-    const processedRows = [];
-    const mergedIndices = new Set();
-
-    for (let i = 0; i < rows.length; i++) {
-      if (mergedIndices.has(i)) continue;
-      
-      const current = { ...rows[i] };
-
-      // Look for a complementary row in subsequent rows
-      for (let j = i + 1; j < rows.length; j++) {
-        if (mergedIndices.has(j)) continue;
-        
-        const next = rows[j];
-        
-        // Must be same route
-        if (current.departureAirport !== next.departureAirport || current.arrivalAirport !== next.arrivalAirport) {
-          continue;
-        }
-
-        // Must be adjacent days (current.date is D, next.date is D+1 or same date)
-        const dateA = new Date(current.date);
-        const dateB = new Date(next.date);
-        const diffDays = Math.round((dateB - dateA) / (1000 * 60 * 60 * 24));
-
-        if (diffDays === 0 || diffDays === 1) {
-          // Check if they are complementary:
-          // Case 1: current has departure but no arrival, next has arrival but no departure
-          const currentHasDepOnly = current.scheduledDeparture !== '-' && current.scheduledArrival === '-';
-          const nextHasArrOnly = next.scheduledArrival !== '-' && next.scheduledDeparture === '-';
-
-          // Case 2: current has arrival but no departure, next has departure but no arrival (less common chronologically, but possible)
-          const currentHasArrOnly = current.scheduledArrival !== '-' && current.scheduledDeparture === '-';
-          const nextHasDepOnly = next.scheduledDeparture !== '-' && next.scheduledArrival === '-';
-
-          if ((currentHasDepOnly && nextHasArrOnly) || (currentHasArrOnly && nextHasDepOnly)) {
-            // Merge next into current
-            if (next.scheduledDeparture !== '-') {
-              current.scheduledDeparture = next.scheduledDeparture;
-              current.date = next.date; // Prefer departure date
-            }
-            if (next.scheduledArrival !== '-') {
-              current.scheduledArrival = next.scheduledArrival;
-            }
-            if (next.actualDeparture !== '-' && next.actualDeparture !== '') {
-              current.actualDeparture = next.actualDeparture;
-            }
-            if (next.actualArrival !== '-' && next.actualArrival !== '') {
-              current.actualArrival = next.actualArrival;
-            }
-            if (next.gate !== '-' && current.gate === '-') {
-              current.gate = next.gate;
-            }
-            if (next.terminal !== 'Ana Terminal' && current.terminal === 'Ana Terminal') {
-              current.terminal = next.terminal;
-            }
-            
-            const getStatusPriority = (status) => {
-              if (!status || status === '-' || status.toLowerCase().includes('plan')) return 0;
-              if (status.toLowerCase().includes('time') || status.toLowerCase().includes('zaman')) return 1;
-              return 2;
-            };
-            if (getStatusPriority(next.status) > getStatusPriority(current.status)) {
-              current.status = next.status;
-            }
-
-            mergedIndices.add(j);
-            break;
-          }
-        }
-      }
-
-      processedRows.push(current);
-    }
-
-    fillMissingLegs(processedRows, (healedRows) => {
+    fillMissingLegs(merged, (healedRows) => {
       const processedRowsWithDelay = healedRows.map(r => {
         const depDelay = calculateDelayMinutes(r.scheduledDeparture, r.actualDeparture);
         const arrDelay = calculateDelayMinutes(r.scheduledArrival, r.actualArrival);
@@ -1419,7 +1426,14 @@ app.get('/api/flights/search', (req, res) => {
       });
 
       // Find the best match for the requested dateStr
-      let bestMatch = processedRowsWithDelay.find(f => f.date === dateStr);
+      let bestMatch = processedRowsWithDelay.find(f => {
+        const depTime = f.scheduledDeparture && f.scheduledDeparture !== '-' ? f.scheduledDeparture : f.scheduledArrival;
+        if (depTime && depTime.includes('T')) {
+          return depTime.split('T')[0] === dateStr;
+        }
+        return f.date === dateStr;
+      });
+      
       if (!bestMatch && processedRowsWithDelay.length > 0) {
         bestMatch = processedRowsWithDelay[0];
       }
