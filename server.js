@@ -493,9 +493,19 @@ function parseSawTable(html, type, todayStr) {
       const depIata = isDeparture ? "SAW" : targetCode;
       const arrIata = isDeparture ? targetCode : "SAW";
 
+      let flightDate = getCorrectFlightDate(todayStr, scheduled);
+      if (!isDeparture && scheduled && scheduled !== '-') {
+        const [h, m] = scheduled.split(':').map(Number);
+        if (!isNaN(h) && h < 1) {
+          const fd = new Date(flightDate);
+          fd.setDate(fd.getDate() - 1);
+          flightDate = `${fd.getFullYear()}-${String(fd.getMonth() + 1).padStart(2, '0')}-${String(fd.getDate()).padStart(2, '0')}`;
+        }
+      }
+
       flights.push({
         flightNumber: flightNum,
-        date: getCorrectFlightDate(todayStr, scheduled),
+        date: flightDate,
         airline: airline || getAirlineName(flightNum),
         departureAirport: depIata,
         arrivalAirport: arrIata,
@@ -570,14 +580,27 @@ async function fetchIstFlights(nature, todayStr) {
           if (data.status === true && data.result && data.result.data && data.result.data.flights) {
             data.result.data.flights.forEach(item => {
               const flightNum = item.flightNumber.replace(/\s+/g, '').toUpperCase();
-              const date = item.scheduledDatetime ? item.scheduledDatetime.split('T')[0] : todayStr;
+              let baseDate = item.scheduledDatetime ? item.scheduledDatetime.split('T')[0] : todayStr;
+              const isArrival = nature === 0;
+              
+              if (isArrival && item.scheduledDatetime) {
+                const parts = item.scheduledDatetime.split('T');
+                if (parts.length === 2) {
+                  const [h, m] = parts[1].split(':').map(Number);
+                  if (!isNaN(h) && h < 1) {
+                    const fd = new Date(baseDate);
+                    fd.setDate(fd.getDate() - 1);
+                    baseDate = `${fd.getFullYear()}-${String(fd.getMonth() + 1).padStart(2, '0')}-${String(fd.getDate()).padStart(2, '0')}`;
+                  }
+                }
+              }
               
               const depIata = item.fromCityCode || (nature === 1 ? "IST" : "-");
               const arrIata = item.toCityCode || (nature === 1 ? "-" : "IST");
 
               const flightObj = {
                 flightNumber: flightNum,
-                date: date,
+                date: baseDate,
                 airline: item.airlineName || getAirlineName(flightNum),
                 departureAirport: depIata,
                 arrivalAirport: arrIata,
@@ -755,6 +778,16 @@ async function fetchDhmiFlights(todayStr) {
                 
                 const targetCode = findAirportCodeByCity(item.SrcDst) || "INT";
                 const isDeparture = da === 'DD';
+                
+                if (!isDeparture && item.Planned) {
+                  const [h, m] = item.Planned.split(':').map(Number);
+                  if (!isNaN(h) && h < 1) {
+                    const fd = new Date(flightDate);
+                    fd.setDate(fd.getDate() - 1);
+                    flightDate = `${fd.getFullYear()}-${String(fd.getMonth() + 1).padStart(2, '0')}-${String(fd.getDate()).padStart(2, '0')}`;
+                  }
+                }
+
                 const depIata = isDeparture ? ap.iata : targetCode;
                 const arrIata = isDeparture ? targetCode : ap.iata;
                 
@@ -999,36 +1032,55 @@ async function runFastWorker() {
   const todayStr = getLocalDateString();
   const newFlights = [];
 
-  // 1. SAW Departures
-  try {
-    const url = "https://www.sabihagokcen.aero/passengers-and-visitors/passenger-guide/flight-info";
-    const res = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
-    if (res.ok) {
-      newFlights.push(...parseSawTable(await res.text(), 'departures', todayStr));
-    }
-  } catch (e) { console.error("SAW Dep hatası:", e.message); }
-
-  // 2. SAW Arrivals
+  // 1 & 2. SAW Scraper (Dynamically detects active tab and parses/requests accordingly)
   try {
     const url = "https://www.sabihagokcen.aero/passengers-and-visitors/passenger-guide/flight-info";
     const getRes = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
     if (getRes.ok) {
-      const html = await getRes.text();
+      const getHtml = await getRes.text();
+      
+      // Check which tab is active by default (Arrivals or Departures)
+      const isArrivalSelected = getHtml.includes('id="LinkButton_Arrival" class="selected"') || getHtml.includes("id='LinkButton_Arrival' class='selected'");
+      const defaultType = isArrivalSelected ? 'arrivals' : 'departures';
+      const oppositeType = isArrivalSelected ? 'departures' : 'arrivals';
+      
+      const oppositeTarget = isArrivalSelected 
+        ? 'ctl00$ctl00$ContentPlaceHolder_ForNested$ContentPlaceHolder_ForNested$LinkButton_Departure' 
+        : 'ctl00$ctl00$ContentPlaceHolder_ForNested$ContentPlaceHolder_ForNested$LinkButton_Arrival';
+
+      // Parse the default page
+      newFlights.push(...parseSawTable(getHtml, defaultType, todayStr));
+
+      // Fetch the opposite page using POST
       const hiddenInputsRegex = /<input\s+type="hidden"\s+name="([^"]*)"\s+id="[^"]*"\s+value="([^"]*)"/gi;
       const formData = new URLSearchParams();
       let match;
-      while ((match = hiddenInputsRegex.exec(html)) !== null) formData.append(match[1], match[2]);
-      formData.set('__EVENTTARGET', 'ctl00$ctl00$ContentPlaceHolder_ForNested$ContentPlaceHolder_ForNested$LinkButton_Arrival');
+      while ((match = hiddenInputsRegex.exec(getHtml)) !== null) {
+        formData.append(match[1], match[2]);
+      }
+      formData.set('__EVENTTARGET', oppositeTarget);
       formData.set('__EVENTARGUMENT', '');
+      
       const cookieHeader = getRes.headers.getSetCookie().map(c => c.split(';')[0]).join('; ');
+      
       const postRes = await fetch(url, {
         method: 'POST',
-        headers: { 'User-Agent': 'Mozilla/5.0', 'Content-Type': 'application/x-www-form-urlencoded', 'Referer': url, 'Cookie': cookieHeader },
+        headers: {
+          'User-Agent': 'Mozilla/5.0',
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'Referer': url,
+          'Cookie': cookieHeader
+        },
         body: formData.toString()
       });
-      if (postRes.ok) newFlights.push(...parseSawTable(await postRes.text(), 'arrivals', todayStr));
+      
+      if (postRes.ok) {
+        newFlights.push(...parseSawTable(await postRes.text(), oppositeType, todayStr));
+      }
     }
-  } catch (e) { console.error("SAW Arr hatası:", e.message); }
+  } catch (e) { 
+    console.error("SAW scraper hatası:", e.message); 
+  }
 
   // 3. IST Departures + Arrivals
   try { newFlights.push(...await fetchIstFlights(1, todayStr)); } catch (e) { console.error("IST Dep hatası:", e.message); }
@@ -1131,6 +1183,137 @@ app.get('/api/status', (req, res) => {
   });
 });
 
+// Helper function to merge independent departure and arrival flight legs
+function mergeFlightLegs(rows) {
+  const groups = {};
+  rows.forEach(r => {
+    if (!groups[r.flightNumber]) {
+      groups[r.flightNumber] = [];
+    }
+    groups[r.flightNumber].push(r);
+  });
+
+  const mergedFlights = [];
+
+  Object.keys(groups).forEach(flightNumber => {
+    const flightRows = groups[flightNumber];
+
+    const departures = [];
+    const arrivals = [];
+    const completed = [];
+
+    flightRows.forEach(r => {
+      const hasDep = r.scheduledDeparture && r.scheduledDeparture !== '-';
+      const hasArr = r.scheduledArrival && r.scheduledArrival !== '-';
+
+      if (hasDep && hasArr) {
+        completed.push({ ...r });
+      } else if (hasDep) {
+        departures.push({ ...r });
+      } else if (hasArr) {
+        arrivals.push({ ...r });
+      }
+    });
+
+    departures.sort((a, b) => a.scheduledDeparture.localeCompare(b.scheduledDeparture));
+    arrivals.sort((a, b) => a.scheduledArrival.localeCompare(b.scheduledArrival));
+
+    const matchedArrivals = new Set();
+
+    departures.forEach(dep => {
+      let bestArr = null;
+      let bestArrIndex = -1;
+      let minDiff = Infinity;
+
+      const depTime = new Date(dep.scheduledDeparture).getTime();
+
+      for (let j = 0; j < arrivals.length; j++) {
+        if (matchedArrivals.has(j)) continue;
+
+        const arr = arrivals[j];
+        if (dep.departureAirport !== arr.departureAirport || dep.arrivalAirport !== arr.arrivalAirport) {
+          continue;
+        }
+
+        const arrTime = new Date(arr.scheduledArrival).getTime();
+        const diff = arrTime - depTime;
+
+        // Arrival must be after departure, and flight duration between 20 mins and 18 hours
+        if (diff > 20 * 60 * 1000 && diff < 18 * 60 * 60 * 1000) {
+          if (diff < minDiff) {
+            minDiff = diff;
+            bestArr = arr;
+            bestArrIndex = j;
+          }
+        }
+      }
+
+      if (bestArr) {
+        matchedArrivals.add(bestArrIndex);
+        mergedFlights.push({
+          ...dep,
+          scheduledArrival: bestArr.scheduledArrival,
+          actualArrival: bestArr.actualArrival !== '-' ? bestArr.actualArrival : dep.actualArrival,
+          terminal: bestArr.terminal !== 'Ana Terminal' ? bestArr.terminal : dep.terminal,
+          gate: bestArr.gate !== '-' ? bestArr.gate : dep.gate,
+          status: bestArr.status !== 'Planlandı' && bestArr.status !== '-' ? bestArr.status : dep.status
+        });
+      } else {
+        mergedFlights.push(dep);
+      }
+    });
+
+    arrivals.forEach((arr, idx) => {
+      if (!matchedArrivals.has(idx)) {
+        mergedFlights.push(arr);
+      }
+    });
+
+    completed.forEach(c => mergedFlights.push(c));
+  });
+
+  // Adjust overnight roll-overs (arrival datetime before departure datetime)
+  const adjustedFlights = mergedFlights.map(f => {
+    if (f.scheduledDeparture && f.scheduledDeparture !== '-' && f.scheduledArrival && f.scheduledArrival !== '-') {
+      const depDate = new Date(f.scheduledDeparture);
+      const arrDate = new Date(f.scheduledArrival);
+      
+      if (!isNaN(depDate.getTime()) && !isNaN(arrDate.getTime()) && arrDate < depDate) {
+        // Shift arrival by +1 day
+        arrDate.setDate(arrDate.getDate() + 1);
+        const year = arrDate.getFullYear();
+        const month = String(arrDate.getMonth() + 1).padStart(2, '0');
+        const day = String(arrDate.getDate()).padStart(2, '0');
+        const hours = String(arrDate.getHours()).padStart(2, '0');
+        const minutes = String(arrDate.getMinutes()).padStart(2, '0');
+        
+        let actualArrival = f.actualArrival;
+        if (actualArrival && actualArrival !== '-') {
+          const actDate = new Date(actualArrival);
+          if (!isNaN(actDate.getTime()) && actDate < depDate) {
+            actDate.setDate(actDate.getDate() + 1);
+            const aYear = actDate.getFullYear();
+            const aMonth = String(actDate.getMonth() + 1).padStart(2, '0');
+            const aDay = String(actDate.getDate()).padStart(2, '0');
+            const aHours = String(actDate.getHours()).padStart(2, '0');
+            const aMinutes = String(actDate.getMinutes()).padStart(2, '0');
+            actualArrival = `${aYear}-${aMonth}-${aDay}T${aHours}:${aMinutes}`;
+          }
+        }
+        
+        return {
+          ...f,
+          scheduledArrival: `${year}-${month}-${day}T${hours}:${minutes}`,
+          actualArrival: actualArrival
+        };
+      }
+    }
+    return f;
+  });
+
+  return adjustedFlights;
+}
+
 // Main combined list of flights
 app.get('/api/flights', (req, res) => {
   let query = "SELECT * FROM flights WHERE 1=1";
@@ -1175,10 +1358,20 @@ app.get('/api/flights', (req, res) => {
     params.push(`%${req.query.flight.replace(/\s+/g, '').trim()}%`);
   }
 
-  // Date Filter
+  // Date Filter (Query yesterday, today, and tomorrow to find and merge complementary overnight flight legs)
   const dateStr = req.query.date ? req.query.date.trim() : getLocalDateString();
-  query += " AND date = ?";
-  params.push(dateStr);
+  const today = new Date(dateStr);
+  
+  const yesterday = new Date(today);
+  yesterday.setDate(yesterday.getDate() - 1);
+  const yStr = `${yesterday.getFullYear()}-${String(yesterday.getMonth() + 1).padStart(2, '0')}-${String(yesterday.getDate()).padStart(2, '0')}`;
+  
+  const tomorrow = new Date(today);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  const tStr = `${tomorrow.getFullYear()}-${String(tomorrow.getMonth() + 1).padStart(2, '0')}-${String(tomorrow.getDate()).padStart(2, '0')}`;
+
+  query += " AND date IN (?, ?, ?)";
+  params.push(yStr, dateStr, tStr);
 
   // Delayed Filter
   if (req.query.delayed === 'true') {
@@ -1189,7 +1382,20 @@ app.get('/api/flights', (req, res) => {
     if (err) {
       return res.status(500).json({ success: false, error: err.message });
     }
-    const flightsWithDelay = rows.map(r => {
+    
+    // Merge flight legs
+    const merged = mergeFlightLegs(rows);
+    
+    // Filter to only include flights departing on the requested date (or arriving if departure is missing)
+    const filtered = merged.filter(f => {
+      const depTime = f.scheduledDeparture && f.scheduledDeparture !== '-' ? f.scheduledDeparture : f.scheduledArrival;
+      if (depTime && depTime.includes('T')) {
+        return depTime.split('T')[0] === dateStr;
+      }
+      return f.date === dateStr;
+    });
+
+    const flightsWithDelay = filtered.map(r => {
       const depDelay = calculateDelayMinutes(r.scheduledDeparture, r.actualDeparture);
       const arrDelay = calculateDelayMinutes(r.scheduledArrival, r.actualArrival);
       const statusInfo = getStandardizedStatus(r.status);
@@ -1205,6 +1411,7 @@ app.get('/api/flights', (req, res) => {
         statusText: statusInfo.text
       };
     });
+    
     res.json({
       success: true,
       count: flightsWithDelay.length,
@@ -1267,90 +1474,10 @@ app.get('/api/flights/search', (req, res) => {
       });
     }
 
-    // Sort rows by date ascending, then by departure/arrival time
-    rows.sort((a, b) => {
-      if (a.date !== b.date) return a.date.localeCompare(b.date);
-      const timeA = a.scheduledDeparture !== '-' ? a.scheduledDeparture : a.scheduledArrival;
-      const timeB = b.scheduledDeparture !== '-' ? b.scheduledDeparture : b.scheduledArrival;
-      return timeA.localeCompare(timeB);
-    });
+    // Merge complementary legs using the same unified logic
+    const merged = mergeFlightLegs(rows);
 
-    // Merge complementary adjacent-day rows (overnight flights)
-    const processedRows = [];
-    const mergedIndices = new Set();
-
-    for (let i = 0; i < rows.length; i++) {
-      if (mergedIndices.has(i)) continue;
-      
-      const current = { ...rows[i] };
-
-      // Look for a complementary row in subsequent rows
-      for (let j = i + 1; j < rows.length; j++) {
-        if (mergedIndices.has(j)) continue;
-        
-        const next = rows[j];
-        
-        // Must be same route
-        if (current.departureAirport !== next.departureAirport || current.arrivalAirport !== next.arrivalAirport) {
-          continue;
-        }
-
-        // Must be adjacent days (current.date is D, next.date is D+1 or same date)
-        const dateA = new Date(current.date);
-        const dateB = new Date(next.date);
-        const diffDays = Math.round((dateB - dateA) / (1000 * 60 * 60 * 24));
-
-        if (diffDays === 0 || diffDays === 1) {
-          // Check if they are complementary:
-          // Case 1: current has departure but no arrival, next has arrival but no departure
-          const currentHasDepOnly = current.scheduledDeparture !== '-' && current.scheduledArrival === '-';
-          const nextHasArrOnly = next.scheduledArrival !== '-' && next.scheduledDeparture === '-';
-
-          // Case 2: current has arrival but no departure, next has departure but no arrival (less common chronologically, but possible)
-          const currentHasArrOnly = current.scheduledArrival !== '-' && current.scheduledDeparture === '-';
-          const nextHasDepOnly = next.scheduledDeparture !== '-' && next.scheduledArrival === '-';
-
-          if ((currentHasDepOnly && nextHasArrOnly) || (currentHasArrOnly && nextHasDepOnly)) {
-            // Merge next into current
-            if (next.scheduledDeparture !== '-') {
-              current.scheduledDeparture = next.scheduledDeparture;
-              current.date = next.date; // Prefer departure date
-            }
-            if (next.scheduledArrival !== '-') {
-              current.scheduledArrival = next.scheduledArrival;
-            }
-            if (next.actualDeparture !== '-' && next.actualDeparture !== '') {
-              current.actualDeparture = next.actualDeparture;
-            }
-            if (next.actualArrival !== '-' && next.actualArrival !== '') {
-              current.actualArrival = next.actualArrival;
-            }
-            if (next.gate !== '-' && current.gate === '-') {
-              current.gate = next.gate;
-            }
-            if (next.terminal !== 'Ana Terminal' && current.terminal === 'Ana Terminal') {
-              current.terminal = next.terminal;
-            }
-            
-            const getStatusPriority = (status) => {
-              if (!status || status === '-' || status.toLowerCase().includes('plan')) return 0;
-              if (status.toLowerCase().includes('time') || status.toLowerCase().includes('zaman')) return 1;
-              return 2;
-            };
-            if (getStatusPriority(next.status) > getStatusPriority(current.status)) {
-              current.status = next.status;
-            }
-
-            mergedIndices.add(j);
-            break;
-          }
-        }
-      }
-
-      processedRows.push(current);
-    }
-
-    fillMissingLegs(processedRows, (healedRows) => {
+    fillMissingLegs(merged, (healedRows) => {
       const processedRowsWithDelay = healedRows.map(r => {
         const depDelay = calculateDelayMinutes(r.scheduledDeparture, r.actualDeparture);
         const arrDelay = calculateDelayMinutes(r.scheduledArrival, r.actualArrival);
@@ -1369,7 +1496,14 @@ app.get('/api/flights/search', (req, res) => {
       });
 
       // Find the best match for the requested dateStr
-      let bestMatch = processedRowsWithDelay.find(f => f.date === dateStr);
+      let bestMatch = processedRowsWithDelay.find(f => {
+        const depTime = f.scheduledDeparture && f.scheduledDeparture !== '-' ? f.scheduledDeparture : f.scheduledArrival;
+        if (depTime && depTime.includes('T')) {
+          return depTime.split('T')[0] === dateStr;
+        }
+        return f.date === dateStr;
+      });
+      
       if (!bestMatch && processedRowsWithDelay.length > 0) {
         bestMatch = processedRowsWithDelay[0];
       }
